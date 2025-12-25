@@ -1,5 +1,12 @@
-calcifer:
+cp_calcifer_01:
   hostname: calcifer
+  connection_options:
+    scrapli:
+      platform: generic
+      port: 22
+      extras:
+        ssh_config_file: True
+        auth_strict_key: False
   groups:
     - k8s_control_plane
 

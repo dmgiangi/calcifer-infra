@@ -1,29 +1,47 @@
 import typer
-from typing import Optional
 from rich import print as rprint
 from rich.panel import Panel
 
-# Import only the Engine, not single workflows
 from core.engine import MatrixEngine
+from core.state import config as global_config
 
 app = typer.Typer(
     help="Calcifer Infrastructure Manager - K8s & Arc Automation",
-    add_completion=False,
+    add_completion=True,
     no_args_is_help=True
 )
 
 
 @app.callback()
-def main_banner():
+def main(
+        ctx: typer.Context,
+        verbose: bool = typer.Option(
+            False, "--verbose", "-v",
+            help="Enable detailed logging of sub-steps to console."
+        )
+):
     """
-    Common entry point. Displays the banner before any command.
+    Calcifer Infrastructure CLI.
+    Common entry point for all commands.
     """
-    rprint(Panel.fit(
-        "[bold white]Calcifer Infrastructure CLI[/bold white]",
-        border_style="blue",
-        subtitle="v2.0 - Matrix Engine"
-    ))
+    # 1. Impostiamo lo stato globale in base al flag
+    global_config.VERBOSE = verbose
 
+    # 2. Mostriamo il banner (solo se non stiamo chiedendo aiuto o completamento)
+    if ctx.invoked_subcommand:
+        subtitle = "v2.0 - Matrix Engine"
+        if verbose:
+            subtitle += " (Verbose Mode)"
+
+        rprint(Panel.fit(
+            "[bold white]Calcifer Infrastructure CLI[/bold white]",
+            border_style="blue",
+            subtitle=subtitle
+        ))
+
+
+# ... I comandi verify, init, destroy rimangono UGUALI ...
+# Typer gestisce il fatto che --verbose sia globale.
 
 @app.command()
 def verify(
@@ -33,7 +51,7 @@ def verify(
         )
 ):
     """
-    [Read-Only] Runs pre-flight checks (dependencies, auth, connectivity).
+    [Read-Only] Runs pre-flight checks.
     Goal: CHECK
     """
     engine = MatrixEngine()
@@ -49,7 +67,6 @@ def init(
 ):
     """
     [Idempotent] Provisions the infrastructure.
-    Installs dependencies, configures K8s, connects to Arc.
     Goal: INIT
     """
     engine = MatrixEngine()
@@ -65,7 +82,7 @@ def destroy(
         )
 ):
     """
-    [Destructive] Deprovisions and removes the cluster/Arc connection.
+    [Destructive] Deprovisions and removes the cluster.
     Goal: DESTROY
     """
     if not force:

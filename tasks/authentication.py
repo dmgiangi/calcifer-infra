@@ -1,67 +1,156 @@
+import json
 from nornir.core.task import Task, Result
 from tasks.utils import run_local
-from core.models import TaskStatus, StandardResult
+from core.models import TaskStatus, StandardResult, SubTaskResult
+from core.decorators import automated_step, automated_substep
 
 
+@automated_substep("Check Execution Environment")
+def _check_environment(task: Task) -> SubTaskResult:
+    if task.host.platform != "linux_local" and "local_machine" not in task.host.groups:
+        return SubTaskResult(success=True, message="Remote Target (Skipping logic)", data="SKIP")
+    return SubTaskResult(success=True, message="Local Execution Confirmed")
+
+
+@automated_substep("Check Azure CLI Binary")
+def _check_cli_installed(task: Task) -> SubTaskResult:
+    res = task.run(task=run_local, command="which az")
+    if res.failed:
+        return SubTaskResult(success=False, message="Binary 'az' not found")
+    return SubTaskResult(success=True, message="CLI Found")
+
+
+@automated_substep("Check Login Session")
+def _check_active_session(task: Task) -> SubTaskResult:
+    # Here we return session data in 'data' to use it later
+    res = task.run(task=run_local, command="az account show -o json")
+    if res.failed:
+        return SubTaskResult(success=False, message="No active session (az login required)")
+
+    try:
+        data = json.loads(res.result)
+        return SubTaskResult(success=True, message="Session Active", data=data)
+    except:
+        return SubTaskResult(success=False, message="JSON parse error on auth data")
+
+
+@automated_substep("Verify Subscription Context")
+def _verify_subscription(task: Task, current_sub_id: str) -> SubTaskResult:
+    # Retrieve target from injected config
+    config = task.host.get("app_config")
+    # Note: Assuming config is a dict (thanks to asdict in engine.py)
+    if not config or "azure" not in config:
+        return SubTaskResult(success=False, message="Missing app_config in inventory")
+
+    target_sub = config["azure"]["subscription_id"]
+
+    if current_sub_id == target_sub:
+        return SubTaskResult(success=True, message=f"Context Correct ({target_sub})")
+
+    # Attempt to switch
+    res = task.run(task=run_local, command=f"az account set --subscription {target_sub}")
+    if res.failed:
+        return SubTaskResult(success=False, message=f"Failed to switch to {target_sub}")
+
+    return SubTaskResult(success=True, message=f"Context Switched to {target_sub}")
+
+
+@automated_substep("Check Arc Extensions")
+def _check_extensions(task: Task) -> SubTaskResult:
+    required = ["connectedk8s"]
+
+    res = task.run(task=run_local, command="az extension list -o json")
+    if res.failed:
+        return SubTaskResult(success=False, message="Failed to list extensions")
+
+    installed = [x["name"] for x in json.loads(res.result)]
+    missing = [x for x in required if x not in installed]
+
+    if missing:
+        return SubTaskResult(success=False, message=f"Missing extensions: {missing}")
+
+    return SubTaskResult(success=True, message="Extensions OK")
+
+
+@automated_substep("Check Resource Providers")
+def _check_providers(task: Task) -> SubTaskResult:
+    required = [
+        "Microsoft.Kubernetes",
+        "Microsoft.KubernetesConfiguration",
+        "Microsoft.ExtendedLocation"
+    ]
+
+    cmd = "az provider list --query \"[?registrationState=='Registered'].namespace\" -o json"
+    res = task.run(task=run_local, command=cmd)
+
+    if res.failed:
+        return SubTaskResult(success=False, message="Failed to list providers")
+
+    registered = json.loads(res.result)
+    missing = [x for x in required if x not in registered]
+
+    if missing:
+        return SubTaskResult(success=False, message=f"Missing providers: {missing}")
+
+    return SubTaskResult(success=True, message="Providers OK")
+
+
+# --- MAIN TASK (Aggregator) ---
+
+@automated_step("Ensure Azure Login & Prerequisites")
 def ensure_azure_login(task: Task) -> Result:
     """
-    Verifies authentication and sets the correct subscription context.
-    Dependency: Requires 'app_config' injected in task.host.
+    Main Orchestrator Task for Authentication.
+    Aggregates atomic sub-steps defined above.
     """
 
-    # 1. Retrieve Configuration (Dependency Injection)
-    config = task.host.get("app_config")
-    if not config or "azure" not in config:
-        return Result(
-            host=task.host,
-            failed=True,
-            result=StandardResult(
-                status=TaskStatus.FAILED,
-                message="Missing 'app_config' or 'azure' settings in host inventory."
-            )
-        )
+    # 1. Environment Guard
+    step_env = _check_environment(task)
+    if not step_env.success: return _fail(task, step_env)
+    if step_env.data == "SKIP":
+        return Result(host=task.host, result=StandardResult(TaskStatus.OK, "Skipped (Remote Host)"))
 
-    target_sub_id = config["azure"]["subscription_id"]
+    # 2. CLI Check
+    step_cli = _check_cli_installed(task)
+    if not step_cli.success: return _fail(task, step_cli)
 
-    # 2. Check Session State
-    verify_cmd = task.run(task=run_local, command="az account show")
+    # 3. Session Check
+    step_login = _check_active_session(task)
+    if not step_login.success: return _fail(task, step_login)
 
-    if verify_cmd.failed:
-        # If verification fails, it's a blocking failure for the INIT goal
-        return Result(
-            host=task.host,
-            failed=True,  # Nornir generic failure
-            result=StandardResult(
-                status=TaskStatus.FAILED,
-                message="Host is not authenticated. Manual 'az login' required."
-            )
-        )
+    # Extract current ID from data passed by subtask
+    current_sub_id = step_login.data.get("id")
 
-    # 3. Check Subscription Context
-    # We parse the JSON output (in a real scenario) or just grep.
-    # For simplicity, we assume if 'az account show' works, we check the ID inside or set it.
+    # 4. Subscription Check
+    step_sub = _verify_subscription(task, current_sub_id)
+    if not step_sub.success: return _fail(task, step_sub)
 
-    # Let's try to set it directly to be sure (Idempotent action)
-    set_sub_cmd = task.run(
-        task=run_local,
-        command=f"az account set --subscription {target_sub_id}"
-    )
+    # 5. Extensions Check
+    step_ext = _check_extensions(task)
+    if not step_ext.success: return _fail(task, step_ext)
 
-    if set_sub_cmd.failed:
-        # This is a nuance: Login is OK, but Subscription is wrong/missing
-        return Result(
-            host=task.host,
-            failed=True,
-            result=StandardResult(
-                status=TaskStatus.FAILED,
-                message=f"Logged in, but failed to set subscription {target_sub_id}. Check permissions."
-            )
-        )
+    # 6. Providers Check
+    step_prov = _check_providers(task)
+    if not step_prov.success: return _fail(task, step_prov)
 
+    # --- SUCCESS ---
+    # Build a nice summary message
     return Result(
         host=task.host,
         result=StandardResult(
             status=TaskStatus.OK,
-            message=f"Authenticated and context set to {target_sub_id}"
+            message="Ready | CLI, Auth, Sub, Exts & Providers verified."
+        )
+    )
+
+
+def _fail(task: Task, sub_res: SubTaskResult) -> Result:
+    """Helper to quickly return a formatted failure."""
+    return Result(
+        host=task.host,
+        failed=True,
+        result=StandardResult(
+            status=TaskStatus.FAILED,
+            message=sub_res.message
         )
     )

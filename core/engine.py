@@ -1,4 +1,5 @@
 import sys
+from dataclasses import asdict
 
 from nornir import InitNornir
 from nornir.core.task import AggregatedResult
@@ -24,7 +25,7 @@ class MatrixEngine:
             app_settings = load_settings()
             self.nr = InitNornir(config_file=self.config_file)
             # Inject settings into global defaults
-            self.nr.inventory.defaults.data["app_config"] = app_settings.__dict__
+            self.nr.inventory.defaults.data["app_config"] = asdict(app_settings)
         except Exception as e:
             console.print(f"[bold red]❌ Init Error:[/bold red] {e}")
             sys.exit(1)

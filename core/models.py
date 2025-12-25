@@ -1,12 +1,14 @@
-from enum import Enum
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Optional
 
+
 class TaskStatus(str, Enum):
-    OK = "OK"             # Task completed successfully or was idempotent (no change)
-    CHANGED = "CHANGED"   # Task performed an action successfully
-    WARNING = "WARNING"   # Task succeeded but with non-critical issues
-    FAILED = "FAILED"     # Task failed, blocking execution
+    OK = "OK"  # Task completed successfully or was idempotent (no change)
+    CHANGED = "CHANGED"  # Task performed an action successfully
+    WARNING = "WARNING"  # Task succeeded but with non-critical issues
+    FAILED = "FAILED"  # Task failed, blocking execution
+
 
 @dataclass
 class StandardResult:
@@ -16,3 +18,11 @@ class StandardResult:
     status: TaskStatus
     message: str
     data: Optional[Any] = None  # To pass data between tasks (context sharing)
+
+
+@dataclass
+class SubTaskResult:
+    """Lightweight result object for internal sub-steps."""
+    success: bool
+    message: str
+    data: Optional[Any] = None # To pass data to the context (e.g., current_sub_id)
