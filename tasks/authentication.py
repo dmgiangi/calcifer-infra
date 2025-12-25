@@ -1,12 +1,6 @@
-import os
-from dotenv import load_dotenv
 from nornir.core.task import Task, Result
-
 from tasks.utils import run_local
 from utils.logger import logger
-
-load_dotenv()
-AZ_SUB = os.getenv("AZURE_SUBSCRIPTION_ID")
 
 
 def check_login_status(task: Task) -> Result:
@@ -15,9 +9,9 @@ def check_login_status(task: Task) -> Result:
     """
 
     # --- Step 1: Verification ---
-    # Usiamo il logger per dare feedback immediato su cosa sta succedendo
     logger.log_step("info", "Verifying active Azure CLI session...")
 
+    # Verify authentication command
     verify_cmd = task.run(task=run_local, command="az account show")
 
     if verify_cmd.failed:
@@ -25,44 +19,38 @@ def check_login_status(task: Task) -> Result:
             "Host is NOT authenticated. "
             "Run 'az login --use-device-code' on the node manually."
         )
-        # Logghiamo l'errore visivamente
-        logger.log_step("error", msg)
-
-        return Result(
-            host=task.host,
-            result=msg,
-            failed=True
-        )
-
-    # Se siamo qui, il login c'è
-    logger.log_step("success", "Active session found")
-
-    # --- Step 2: Set Context ---
-    if not AZ_SUB:
-        msg = "AZURE_SUBSCRIPTION_ID is missing in .env file."
         logger.log_step("error", msg)
         return Result(host=task.host, result=msg, failed=True)
 
-    logger.log_step("info", f"Setting subscription context to: {AZ_SUB}")
+    logger.log_step("success", "Active session found")
+
+    # --- Step 2: Set Context using Injected Config ---
+    # Retrieve configuration from host data (injected in runner.py)
+    app_config = task.host.get("app_config")
+
+    if not app_config:
+        msg = "Configuration not found in host data."
+        logger.log_step("error", msg)
+        return Result(host=task.host, result=msg, failed=True)
+
+    # Access the subscription ID safely
+    az_sub = app_config["azure"]["subscription_id"]
+
+    logger.log_step("info", f"Setting subscription context to: {az_sub}")
 
     set_sub_cmd = task.run(
         task=run_local,
-        command=f"az account set --subscription {AZ_SUB}"
+        command=f"az account set --subscription {az_sub}"
     )
 
     if set_sub_cmd.failed:
         error_msg = f"Failed to set subscription: {set_sub_cmd.result}"
         logger.log_step("error", error_msg)
-        return Result(
-            host=task.host,
-            result=error_msg,
-            failed=True
-        )
+        return Result(host=task.host, result=error_msg, failed=True)
 
-    # Log finale di successo per questa sotto-operazione
     logger.log_step("success", "Subscription context set correctly")
 
     return Result(
         host=task.host,
-        result=f"Success: Authenticated and Subscription set to {AZ_SUB}"
+        result=f"Success: Authenticated and Subscription set to {az_sub}"
     )

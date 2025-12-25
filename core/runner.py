@@ -6,6 +6,13 @@ from nornir.core.task import AggregatedResult, Task, Result
 from rich.panel import Panel
 from utils.logger import logger
 
+import sys
+from typing import Callable, Dict, Any, asdict  # Added asdict
+from nornir import InitNornir
+from nornir.core.task import AggregatedResult, Task, Result
+from rich.panel import Panel
+from utils.logger import logger
+from core.settings import load_settings
 
 def execute_nornir_workflow(
         workflow_func: Callable[[Task], Result],
@@ -59,7 +66,26 @@ def execute_nornir_workflow(
         name=workflow_name
     )
 
-    # 5. Final Summary
+    # 5. Configuration Injection
+    try:
+        # Load Global Settings
+        app_settings = load_settings()
+
+        # Initialize Nornir
+        nr = InitNornir(config_file=config_file)
+
+        # INJECTION: Add settings to Nornir's global defaults
+        # This makes 'app_config' accessible in any task via task.host["app_config"]
+        nr.inventory.defaults.data["app_config"] = asdict(app_settings)
+
+    except ValueError as e:
+        logger.console.print(f"[bold red]❌ Configuration Error:[/bold red] {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.console.print(f"[bold red]❌ Critical Error initializing Nornir:[/bold red] {e}")
+        sys.exit(1)
+
+    # 6. Final Summary
     _print_summary(result)
 
 
