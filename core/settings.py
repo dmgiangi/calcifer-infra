@@ -10,40 +10,42 @@ load_dotenv()
 class AzureSettings:
     """Configuration for Azure resources."""
     subscription_id: str
-    tenant_id: Optional[str] = None
-    location: str = "westeurope"
-    resource_group: str = "calcifer-rg"
+    tenant_id: Optional[str]
+    location: str
+    resource_group: str
 
 @dataclass
 class K8sSettings:
     """Configuration for Kubernetes cluster."""
-    version: str = "1.29"
+    version: str
 
 @dataclass
 class AppSettings:
     """Main application configuration aggregator."""
     azure: AzureSettings
     k8s: K8sSettings
-    environment: str = "dev"
+    environment: str
 
 def load_settings() -> AppSettings:
     """
     Loads configuration from environment variables.
     Raises ValueError if critical variables are missing.
     """
-    sub_id = os.getenv("AZURE_SUBSCRIPTION_ID")
-    if not sub_id:
-        raise ValueError("AZURE_SUBSCRIPTION_ID is missing in .env file")
+    def get_env_or_raise(key: str) -> str:
+        value = os.getenv(key)
+        if not value:
+            raise ValueError(f"{key} is missing in .env file")
+        return value
 
     return AppSettings(
         azure=AzureSettings(
-            subscription_id=sub_id,
+            subscription_id=get_env_or_raise("AZURE_SUBSCRIPTION_ID"),
             tenant_id=os.getenv("AZURE_TENANT_ID"),
-            location=os.getenv("AZURE_LOCATION", "westeurope"),
-            resource_group=os.getenv("AZURE_RESOURCE_GROUP", "calcifer-rg")
+            location=get_env_or_raise("AZURE_LOCATION"),
+            resource_group=get_env_or_raise("AZURE_RESOURCE_GROUP")
         ),
         k8s=K8sSettings(
-            version=os.getenv("K8S_VERSION", "1.29")
+            version=get_env_or_raise("K8S_VERSION")
         ),
-        environment=os.getenv("ENV", "dev")
+        environment=get_env_or_raise("ENV")
     )

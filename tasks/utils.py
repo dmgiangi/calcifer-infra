@@ -4,8 +4,8 @@ from nornir.core.task import Task, Result
 
 
 def run_local(task: Task, command: str) -> Result:
-    """Esegue comandi nativi OS senza passare per SSH/Scrapli"""
-    # Esegue il comando
+    """Executes native OS commands without using SSH/Scrapli"""
+    # Execute the command
     proc = subprocess.run(
         shlex.split(command),
         stdout=subprocess.PIPE,
@@ -13,8 +13,8 @@ def run_local(task: Task, command: str) -> Result:
         universal_newlines=True
     )
 
-    # Prepara il risultato Nornir
-    # Se returncode != 0, è fallito
+    # Prepare Nornir result
+    # If returncode != 0, it failed
     return Result(
         host=task.host,
         result=proc.stdout if proc.returncode == 0 else f"{proc.stdout}\nError: {proc.stderr}",
