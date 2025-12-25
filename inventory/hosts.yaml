@@ -1,0 +1,9 @@
+calcifer:
+  hostname: calcifer
+  groups:
+    - k8s_control_plane
+
+localhost:
+  hostname: 127.0.0.1
+  groups:
+    - local_machine

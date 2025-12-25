@@ -1,0 +1,11 @@
+# inventory/groups.yaml
+k8s_control_plane:
+  platform: generic
+  connection_options:
+    scrapli:
+      platform: linux
+      port: 22
+      auth_strict_key: false
+
+local_machine:
+  platform: linux_local
