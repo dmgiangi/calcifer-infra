@@ -1,0 +1,26 @@
+environment: prod
+
+azure:
+  resource_group: "calcifer-cluster-rg"
+  location: "westeurope"
+
+k8s:
+  version: "1.29"
+  pod_network_cidr: "10.244.0.0/16"
+  
+  kernel_modules:
+    - overlay
+    - br_netfilter
+  
+  sysctl_params:
+    net.bridge.bridge-nf-call-ip6tables: "1"
+    net.bridge.bridge-nf-call-iptables: "1"
+    net.ipv4.ip_forward: "1"
+    fs.inotify.max_user_watches: "524288"
+    fs.inotify.max_user_instances: "512"
+
+  flux:
+    enabled: true
+    github_url: "ssh://git@github.com/my-org/my-infra-repo.git"
+    branch: "main"
+    cluster_path: "clusters/production/westeurope"

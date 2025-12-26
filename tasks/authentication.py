@@ -1,8 +1,10 @@
 import json
+
 from nornir.core.task import Task, Result
-from tasks.utils import run_local
-from core.models import TaskStatus, StandardResult, SubTaskResult
+
 from core.decorators import automated_step, automated_substep
+from core.models import TaskStatus, StandardResult, SubTaskResult
+from tasks.utils import run_local, fail
 
 
 @automated_substep("Check Execution Environment")
@@ -106,32 +108,32 @@ def ensure_azure_login(task: Task) -> Result:
 
     # 1. Environment Guard
     step_env = _check_environment(task)
-    if not step_env.success: return _fail(task, step_env)
+    if not step_env.success: return fail(task, step_env)
     if step_env.data == "SKIP":
         return Result(host=task.host, result=StandardResult(TaskStatus.OK, "Skipped (Remote Host)"))
 
     # 2. CLI Check
     step_cli = _check_cli_installed(task)
-    if not step_cli.success: return _fail(task, step_cli)
+    if not step_cli.success: return fail(task, step_cli)
 
     # 3. Session Check
     step_login = _check_active_session(task)
-    if not step_login.success: return _fail(task, step_login)
+    if not step_login.success: return fail(task, step_login)
 
     # Extract current ID from data passed by subtask
     current_sub_id = step_login.data.get("id")
 
     # 4. Subscription Check
     step_sub = _verify_subscription(task, current_sub_id)
-    if not step_sub.success: return _fail(task, step_sub)
+    if not step_sub.success: return fail(task, step_sub)
 
     # 5. Extensions Check
     step_ext = _check_extensions(task)
-    if not step_ext.success: return _fail(task, step_ext)
+    if not step_ext.success: return fail(task, step_ext)
 
     # 6. Providers Check
     step_prov = _check_providers(task)
-    if not step_prov.success: return _fail(task, step_prov)
+    if not step_prov.success: return fail(task, step_prov)
 
     # --- SUCCESS ---
     # Build a nice summary message
@@ -140,17 +142,5 @@ def ensure_azure_login(task: Task) -> Result:
         result=StandardResult(
             status=TaskStatus.OK,
             message="Ready | CLI, Auth, Sub, Exts & Providers verified."
-        )
-    )
-
-
-def _fail(task: Task, sub_res: SubTaskResult) -> Result:
-    """Helper to quickly return a formatted failure."""
-    return Result(
-        host=task.host,
-        failed=True,
-        result=StandardResult(
-            status=TaskStatus.FAILED,
-            message=sub_res.message
         )
     )

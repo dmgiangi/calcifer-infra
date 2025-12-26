@@ -1,0 +1,157 @@
+from pathlib import Path
+
+from nornir.core.task import Task, Result
+
+from core.decorators import automated_step, automated_substep
+from core.models import TaskStatus, StandardResult, SubTaskResult
+from tasks.utils import fail, run_cmd
+
+
+# --- SUB-STEPS ---
+
+@automated_substep("Install Flux CLI")
+def _install_flux_cli(task: Task) -> SubTaskResult:
+    """
+    Downloads and installs the Flux CLI if not present.
+    """
+    # Idempotency check
+    check_cmd = "which flux"
+    if not run_cmd(task, check_cmd).failed:
+        return SubTaskResult(success=True, message="Flux CLI already installed")
+
+    # Install
+    # -s: silent, -S: show errors
+    cmd = "curl -sS https://fluxcd.io/install.sh | sudo bash"
+    res = run_cmd(task, cmd)
+
+    if res.failed:
+        return SubTaskResult(success=False, message="Failed to install Flux CLI")
+
+    return SubTaskResult(success=True, message="Flux CLI installed")
+
+
+@automated_substep("Configure Flux SSH Key")
+def _configure_ssh_key(task: Task, local_path: str, remote_path: str) -> SubTaskResult:
+    """
+    Reads the PRIVATE key from the LOCAL controller and writes it to the REMOTE node.
+    Sets strict 0600 permissions.
+    """
+    # 1. Read Local Key
+    local_file = Path(local_path)
+    if not local_file.exists():
+        return SubTaskResult(success=False, message=f"Local key not found at {local_path}")
+
+    try:
+        key_content = local_file.read_text().strip()
+    except Exception as e:
+        return SubTaskResult(success=False, message=f"Failed to read local key: {e}")
+
+    # 2. Ensure Remote Directory Exists
+    remote_dir = str(Path(remote_path).parent)
+    run_cmd(task, f"mkdir -p {remote_dir}")
+
+    # 3. Write Remote File
+    # We use a heredoc pattern to write the content safely via cat
+    # Note: We do NOT log the command here to prevent leaking the key in logs
+    # Using 'EOF' in quotes prevents variable expansion in the key
+
+    # Escape single quotes just in case, though unlikely in standard keys
+    safe_content = key_content.replace("'", "'\\''")
+
+    write_cmd = f"cat << 'EOF' > {remote_path}\n{safe_content}\nEOF"
+
+    res_write = run_cmd(task, write_cmd)
+    if res_write.failed:
+        return SubTaskResult(success=False, message="Failed to write remote key file")
+
+    # 4. Set Permissions (0600)
+    res_chmod = run_cmd(task, f"chmod 0600 {remote_path}")
+    if res_chmod.failed:
+        return SubTaskResult(success=False, message="Failed to set key permissions")
+
+    return SubTaskResult(success=True, message="SSH Key configured")
+
+
+@automated_substep("Bootstrap Flux")
+def _bootstrap_flux(task: Task, config: dict) -> SubTaskResult:
+    """
+    Runs 'flux bootstrap git'.
+    Uses a marker file to ensure idempotency (avoid restarting bootstrap unnecessarily).
+    """
+    marker_file = "/var/lib/flux_bootstrapped"
+
+    # 1. Idempotency Check
+    if not run_cmd(task, f"test -f {marker_file}").failed:
+        return SubTaskResult(success=True, message="Bootstrap already completed (marker exists)")
+
+    # 2. Prepare Command
+    flux_conf = config["k8s"]["flux"]
+    url = flux_conf["github_url"]
+    branch = flux_conf["branch"]
+    path = flux_conf["cluster_path"]
+    key_path = flux_conf["remote_key_path"]
+
+    # We need KUBECONFIG env var. We prepend it to the command.
+    # Note: We use strict host key checking=no for automation, or we accept the risk.
+    # Flux usually handles known_hosts, but we pass the private key file explicitly.
+
+    bootstrap_cmd = (
+        f"export KUBECONFIG=/etc/kubernetes/admin.conf && "
+        f"flux bootstrap git "
+        f"--url={url} "
+        f"--branch={branch} "
+        f"--path={path} "
+        f"--private-key-file={key_path} "
+        f"--silent"  # Reduce noise, we rely on exit code
+    )
+
+    # 3. Execute (This takes time)
+    # We might need to adjust timeout if connection is slow
+    res = run_cmd(task, bootstrap_cmd)
+
+    if res.failed:
+        # Return last lines of error
+        err_snippet = res.result[-200:] if res.result else "Unknown Error"
+        return SubTaskResult(success=False, message=f"Bootstrap failed: {err_snippet}")
+
+    # 4. Create Marker File
+    run_cmd(task, f"sudo touch {marker_file}")
+
+    return SubTaskResult(success=True, message="Flux Bootstrapped successfully")
+
+
+# --- MAIN TASK ---
+
+@automated_step("Install & Bootstrap FluxCD")
+def setup_fluxcd(task: Task) -> Result:
+    """
+    Orchestrates Flux installation and GitOps bootstrapping.
+    """
+    config = task.host.get("app_config")
+
+    # Check if Flux is enabled
+    if not config["k8s"]["flux"]["enabled"]:
+        return Result(host=task.host, result=StandardResult(TaskStatus.SKIPPED, "Flux disabled in settings"))
+
+    local_key = config["k8s"]["flux"]["local_key_path"]
+    remote_key = config["k8s"]["flux"]["remote_key_path"]
+
+    # 1. Install CLI
+    s1 = _install_flux_cli(task)
+    if not s1.success: return fail(task, s1)
+
+    # 2. Setup SSH Key
+    s2 = _configure_ssh_key(task, local_path=local_key, remote_path=remote_key)
+    if not s2.success: return fail(task, s2)
+
+    # 3. Bootstrap
+    s3 = _bootstrap_flux(task, config)
+    if not s3.success: return fail(task, s3)
+
+    return Result(
+        host=task.host,
+        result=StandardResult(
+            status=TaskStatus.CHANGED,
+            message="GitOps Pipeline Active (Flux)"
+        )
+    )

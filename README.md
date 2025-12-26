@@ -31,7 +31,7 @@ idempotence.
 ├── inventory/          # Nornir inventory (hosts.yaml, groups.yaml)
 ├── utils/              # Logging utilities
 ├── main.py             # CLI Entry point
-└── config.yaml         # Nornir configuration
+└── inventory_config.yaml         # Nornir configuration
 ```
 
 ## 🛠️ Installation

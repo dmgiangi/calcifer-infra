@@ -1,4 +1,4 @@
-cp_calcifer_01:
+cp-calcifer-01:
   hostname: calcifer
   connection_options:
     scrapli:

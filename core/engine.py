@@ -14,7 +14,7 @@ console = Console()
 
 
 class MatrixEngine:
-    def __init__(self, config_file: str = "config.yaml"):
+    def __init__(self, config_file: str = "inventory_config.yaml"):
         self.config_file = config_file
         self.nr = None
         self._initialize()

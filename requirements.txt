@@ -5,3 +5,4 @@ python-dotenv==1.2.1
 rich==14.2.0
 typer==0.20.0
 shellingham==1.5.4
+pyyaml==6.0.3
