@@ -1,7 +1,8 @@
 environment: prod
 
 azure:
-  resource_group: "calcifer-cluster-rg"
+  subscription_id: "1679edc6-fa8e-4210-9607-7b4dfd048934"
+  resource_group: "rg-calcifer-westeurope-001"
   location: "westeurope"
 
 k8s:
