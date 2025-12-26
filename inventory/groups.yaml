@@ -5,7 +5,7 @@ k8s_control_plane:
     scrapli:
       platform: generic
       port: 22
-      auth_strict_key: false
+      auth_strict_key: true
 
 local_machine:
   platform: linux_local
