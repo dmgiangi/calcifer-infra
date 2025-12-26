@@ -102,7 +102,7 @@ def install_arc_agent(task: Task) -> Result:
     s1 = _check_arc_status(task, resource_group, cluster_name)
     if not s1.success: return fail(task, s1)
 
-    if s1.data is True:
+    if s1.data:
         return Result(
             host=task.host,
             result=StandardResult(TaskStatus.OK, s1.message)

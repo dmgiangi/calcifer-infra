@@ -1,16 +1,16 @@
 from typing import Dict, List, Callable, Any
 
-from tasks.arc import install_arc_agent
-from tasks.authentication import ensure_azure_login
-from tasks.connectivity import check_internet_access
-from tasks.containerd import install_containerd
-from tasks.control_plane import init_control_plane
-from tasks.dependencies import ensure_azure_cli
-from tasks.facts import gather_system_facts
-from tasks.flux import setup_fluxcd
-from tasks.k8s_prep import prepare_k8s_node
-from tasks.kubetools import install_kubernetes_tools
-from tasks.system import set_hostname_and_hosts
+from tasks.azure_arc_onboarding import install_arc_agent
+from tasks.azure_auth_setup import ensure_azure_login
+from tasks.azure_cli_setup import ensure_azure_cli
+from tasks.cri_containerd_setup import install_containerd
+from tasks.gitops_flux_setup import setup_fluxcd
+from tasks.k8s_control_plane_init import init_control_plane
+from tasks.k8s_node_preparation import prepare_k8s_node
+from tasks.k8s_tools_installation import install_kubernetes_tools
+from tasks.network_connectivity import check_internet_access
+from tasks.os_facts_gathering import gather_system_facts
+from tasks.os_hostname_setup import set_hostname_and_hosts
 
 TaskChain = List[Callable[..., Any]]
 
