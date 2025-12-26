@@ -4,7 +4,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import fail, run_command, write_file
+from tasks import fail, run_command, write_file, remote_file_exists
 
 
 # --- SUB-STEPS ---
@@ -68,7 +68,7 @@ def _bootstrap_flux(task: Task, config: dict) -> SubTaskResult:
     """
     marker_file = "/var/lib/flux_bootstrapped"
 
-    if not run_command(task, f"test -f {marker_file}").failed:
+    if remote_file_exists(task, marker_file):
         return SubTaskResult(success=True, message="Bootstrap already completed")
 
     flux_conf = config["k8s"]["flux"]

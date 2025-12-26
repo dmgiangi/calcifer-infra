@@ -2,7 +2,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import fail, run_command, write_file, read_file
+from tasks import fail, run_command, write_file, read_file, remote_file_exists, add_apt_repository
 
 
 # --- SUB-STEPS ---
@@ -21,73 +21,33 @@ def _install_deps(task: Task) -> SubTaskResult:
     return SubTaskResult(success=True, message="Dependencies installed")
 
 
-@automated_substep("Setup Docker GPG Key")
-def _setup_gpg(task: Task, distro_id: str) -> SubTaskResult:
-    """
-    Downloads and dearmors the Docker GPG key if not present.
-    """
-    keyring_path = "/etc/apt/keyrings/docker.gpg"
-    temp_key_path = "/tmp/docker.gpg.asc"
-
-    # 1. Idempotency Check
-    if not run_command(task, f"test -f {keyring_path}").failed:
-        return SubTaskResult(success=True, message="GPG Key already present")
-
-    # 2. Prepare Directory
-    run_command(task, "mkdir -p /etc/apt/keyrings", True)
-
-    # 3. Download
-    url = f"https://download.docker.com/linux/{distro_id}/gpg"
-    download_cmd = f"curl -fsSL {url} -o {temp_key_path}"
-    res_download = run_command(task, download_cmd)
-    if res_download.failed:
-        return SubTaskResult(success=False, message=f"Failed to download GPG key from {url}")
-
-    # 4. Dearmor
-    dearmor_cmd = f"gpg --dearmor -o {keyring_path} {temp_key_path}"
-    res_dearmor = run_command(task, dearmor_cmd, sudo=True)
-
-    # 5. Cleanup
-    run_command(task, f"rm {temp_key_path}")
-
-    if res_dearmor.failed:
-        return SubTaskResult(success=False, message="Failed to dearmor GPG key")
-
-    # 6. Set Permissions
-    run_command(task, f"chmod a+r {keyring_path}", True)
-
-    return SubTaskResult(success=True, message="GPG Key setup complete")
-
-
 @automated_substep("Configure Docker Repository")
-def _add_repo(task: Task) -> SubTaskResult:
+def _add_docker_repo(task: Task) -> SubTaskResult:
     """
-    Generates the sources.list file dynamically based on OS Facts (Arch/Distro).
+    Adds the Docker repository using the centralized apt utility.
     """
     facts = task.host.get("os_facts")
     if not facts:
         return SubTaskResult(success=False, message="Missing OS Facts. Run 'gather_system_facts' first.")
 
-    distro_id = facts["id"]  # e.g., ubuntu, debian
-    codename = facts["codename"]  # e.g., jammy, bookworm
-    arch = facts["arch"]  # e.g., amd64, arm64
+    distro_id = facts.get("id", "ubuntu")
+    codename = facts.get("codename", "jammy")
+    arch = facts.get("arch", "amd64")
 
-    repo_path = "/etc/apt/sources.list.d/docker.list"
+    key_path = "/etc/apt/keyrings/docker.gpg"
 
-    # Construct the repo line dynamically
-    repo_content = (
-        f"deb [arch={arch} signed-by=/etc/apt/keyrings/docker.gpg] "
+    repo_string = (
+        f"deb [arch={arch} signed-by={key_path}] "
         f"https://download.docker.com/linux/{distro_id} {codename} stable\n"
     )
 
-    # Atomic write using our secure helper
-    res = write_file(task, repo_path, repo_content)
-
-    if res.failed:
-        return SubTaskResult(success=False, message="Failed to write docker.list")
-
-    msg = f"Repo added for {distro_id}/{codename} ({arch})" if res.changed else "Repo up-to-date"
-    return SubTaskResult(success=True, message=msg)
+    return add_apt_repository(
+        task,
+        repo_name="docker",
+        repo_string=repo_string,
+        gpg_key_url=f"https://download.docker.com/linux/{distro_id}/gpg",
+        gpg_key_path=key_path,
+    )
 
 
 @automated_substep("Install Containerd Package")
@@ -116,9 +76,7 @@ def _configure_containerd(task: Task) -> SubTaskResult:
     # 1. Generate Default Config if missing
     run_command(task, "mkdir -p /etc/containerd", True)
 
-    exists = not run_command(task, f"test -f {config_path}").failed
-
-    if not exists:
+    if not remote_file_exists(task, config_path):
         gen_cmd = "containerd config default"
         res_gen = run_command(task, gen_cmd)
         if res_gen.failed:
@@ -135,8 +93,8 @@ def _configure_containerd(task: Task) -> SubTaskResult:
     content = re.sub(r"(\s*SystemdCgroup\s*=\s*)false", r"\1true", content)
 
     # Remove CRI from disabled_plugins
-    content = re.sub(r'(disabled_plugins\s*=\s*\[.*)("cri",?.*\])', r'\1]', content)
-
+    content = re.sub(r'(disabled_plugins\s*=\s*\[.*)("cri",?.*\])', r"\1]", content)
+    
     res_patch = write_file(task, config_path, content)
 
     if res_patch.failed:
@@ -168,33 +126,25 @@ def install_containerd(task: Task) -> Result:
     Full pipeline to setup Containerd as CRI for Kubernetes.
     Supports multi-arch and multi-distro via OS Facts.
     """
-    # Retrieve OS Facts for dynamic configuration
-    facts = task.host.get("os_facts")
-    distro_id = facts.get("id", "ubuntu") if facts else "ubuntu"
-
     # 1. Dependencies
     s1 = _install_deps(task)
     if not s1.success: return fail(task, s1)
 
-    # 2. GPG Key
-    s2 = _setup_gpg(task, distro_id)
+    # 2. Add Docker Repo (includes GPG)
+    s2 = _add_docker_repo(task)
     if not s2.success: return fail(task, s2)
 
-    # 3. Repository
-    s3 = _add_repo(task)
+    # 3. Install Package
+    s3 = _install_containerd(task)
     if not s3.success: return fail(task, s3)
 
-    # 4. Install Package
-    s4 = _install_containerd(task)
+    # 4. Configure (config.toml)
+    s4 = _configure_containerd(task)
     if not s4.success: return fail(task, s4)
 
-    # 5. Configure (config.toml)
-    s5 = _configure_containerd(task)
+    # 5. Service Restart
+    s5 = _restart_service(task)
     if not s5.success: return fail(task, s5)
-
-    # 6. Service Restart
-    s6 = _restart_service(task)
-    if not s6.success: return fail(task, s6)
 
     return Result(
         host=task.host,

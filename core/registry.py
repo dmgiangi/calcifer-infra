@@ -21,10 +21,10 @@ TASK_REGISTRY: Dict[str, Dict[str, TaskChain]] = {
     # --- GOAL: INIT (Cluster Provisioning) ---
     "INIT": {
         "local_machine": [
-            check_internet_access,
-            gather_system_facts,
-            ensure_azure_cli,
-            ensure_azure_login
+            # check_internet_access,
+            # gather_system_facts,
+            # ensure_azure_cli,
+            # ensure_azure_login
         ],
         "k8s_control_plane": [
             check_internet_access,

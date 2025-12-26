@@ -6,17 +6,15 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import fail, run_command, write_file, read_file
+from tasks import fail, run_command, write_file, read_file, remote_file_exists
 
-
-# --- SUB-STEPS ---
 
 @automated_substep("Check Cluster Status")
 def _check_initialization(task: Task) -> SubTaskResult:
-    cmd = "test -f /etc/kubernetes/admin.conf"
-    res = run_command(task, cmd)
-
-    if not res.failed:
+    """
+    Checks if /etc/kubernetes/admin.conf exists.
+    """
+    if remote_file_exists(task, "/etc/kubernetes/admin.conf"):
         return SubTaskResult(success=True, message="Cluster already initialized", data=True)
 
     return SubTaskResult(success=True, message="Cluster not initialized", data=False)
