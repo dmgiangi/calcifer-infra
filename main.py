@@ -25,7 +25,7 @@ def main(
             help="Disable detailed sub-step logging (Silent Mode)."
         ),
         config_file: Path = typer.Option(
-            "calcifer_config.yaml", "--config", "-c",
+            "cluster_config.yaml", "--config", "-c",
             help="Path to the configuration YAML file.",
             exists=True, dir_okay=False, readable=True
         )

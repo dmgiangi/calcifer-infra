@@ -43,7 +43,7 @@ class K8sSettings:
     local_kubeconfig_path: str = "inventory/kubeconfig_admin.yaml"
     flux: FluxSettings = field(default_factory=FluxSettings)
 
-    # Empty defaults: Le liste reali devono essere nel calcifer_config.yaml
+    # Empty defaults: Le liste reali devono essere nel cluster_config.yaml
     kernel_modules: List[str] = field(default_factory=list)
     sysctl_params: Dict[str, str] = field(default_factory=dict)
 
@@ -58,7 +58,7 @@ class AppSettings:
 
 # --- LOADER LOGIC ---
 
-def load_settings(config_path: str = "calcifer_config.yaml") -> AppSettings:
+def load_settings(config_path: str = "cluster_config.yaml") -> AppSettings:
     """
     Loads configuration merging: Defaults (Schema) < YAML File (Config) < Environment Vars (Secrets).
     """

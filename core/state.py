@@ -4,6 +4,6 @@ class RuntimeConfig:
     """
     # Changed Default: True (Verbose by default)
     VERBOSE: bool = True
-    CONFIG_FILE: str = "calcifer_config.yaml"
+    CONFIG_FILE: str = "cluster_config.yaml"
 
 config = RuntimeConfig()
