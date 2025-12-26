@@ -5,7 +5,8 @@ from .utils import (
     write_file,
     ensure_line_in_file,
     add_apt_repository,
-    remote_file_exists
+    remote_file_exists,
+    apt_install
 )
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "write_file",
     "ensure_line_in_file",
     "add_apt_repository",
-    "remote_file_exists"
+    "remote_file_exists",
+    "apt_install"
 ]

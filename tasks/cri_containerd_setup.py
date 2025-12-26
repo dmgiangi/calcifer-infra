@@ -2,7 +2,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import fail, run_command, write_file, read_file, remote_file_exists, add_apt_repository
+from tasks import fail, run_command, write_file, read_file, remote_file_exists, add_apt_repository, apt_install
 
 
 # --- SUB-STEPS ---
@@ -13,11 +13,10 @@ def _install_deps(task: Task) -> SubTaskResult:
     Installs prerequisites for fetching repositories over HTTPS.
     """
     pkgs = "ca-certificates curl gnupg apt-transport-https software-properties-common"
-    cmd = f"sudo apt-get update && sudo apt-get install -y {pkgs}"
-
-    res = run_command(task, cmd)
+    res = apt_install(task, pkgs)
+    
     if res.failed:
-        return SubTaskResult(success=False, message="Failed to install dependencies")
+        return SubTaskResult(success=False, message=f"Failed to install dependencies: {res.result}")
     return SubTaskResult(success=True, message="Dependencies installed")
 
 
@@ -55,12 +54,10 @@ def _install_containerd(task: Task) -> SubTaskResult:
     """
     Updates apt cache and installs containerd.io.
     """
-    # Force update to ensure the new repo is picked up
-    cmd = "sudo apt-get update && sudo apt-get install -y containerd.io"
-    res = run_command(task, cmd)
+    res = apt_install(task, "containerd.io")
 
     if res.failed:
-        return SubTaskResult(success=False, message="Apt install failed")
+        return SubTaskResult(success=False, message=f"Apt install failed: {res.result}")
 
     return SubTaskResult(success=True, message="Containerd installed")
 
@@ -93,7 +90,7 @@ def _configure_containerd(task: Task) -> SubTaskResult:
     content = re.sub(r"(\s*SystemdCgroup\s*=\s*)false", r"\1true", content)
 
     # Remove CRI from disabled_plugins
-    content = re.sub(r'(disabled_plugins\s*=\s*\[.*)("cri",?.*\])', r"\1]", content)
+    content = re.sub(r'(disabled_plugins\s*=\s*\[.*)("cri",?.*\\])', r'\1]', content)
     
     res_patch = write_file(task, config_path, content)
 

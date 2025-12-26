@@ -1,6 +1,7 @@
 import os
+from typing import List, Union
 
-from nornir.core.task import Task
+from nornir.core.task import Task, Result
 
 from core.models import SubTaskResult
 from .command import run_command
@@ -61,3 +62,33 @@ def add_apt_repository(
         return SubTaskResult(success=False, message=f"Failed to write repository file: {res_write.result}")
 
     return SubTaskResult(success=True, message=f"APT repository '{repo_name}' configured.")
+
+
+def apt_install(task: Task, packages: Union[str, List[str]]) -> Result:
+    """
+    Installs APT packages robustly.
+    
+    1. Runs apt-get update
+    2. Runs apt-get install -y <packages>
+    
+    Args:
+        task: The Nornir task.
+        packages: A single package string or a list of package strings.
+        
+    Returns:
+        The Result of the install command (or the update command if it failed).
+    """
+    # 1. Normalize input
+    if isinstance(packages, list):
+        pkg_str = " ".join(packages)
+    else:
+        pkg_str = packages
+
+    # 2. Update
+    res_up = run_command(task, "apt-get update", sudo=True)
+    if res_up.failed:
+        return Result(host=task.host, failed=True, result=f"Apt update failed: {res_up.result}")
+
+    # 3. Install
+    cmd_install = f"DEBIAN_FRONTEND=noninteractive apt-get install -y {pkg_str}"
+    return run_command(task, cmd_install, sudo=True)

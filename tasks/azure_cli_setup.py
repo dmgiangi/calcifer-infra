@@ -2,7 +2,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import run_command, fail, add_apt_repository
+from tasks import run_command, fail, add_apt_repository, apt_install
 
 
 # --- SUB-STEPS ---
@@ -40,14 +40,9 @@ def _install_package(task: Task) -> SubTaskResult:
     """
     Updates apt cache and installs the actual azure-cli package.
     """
-    # We update to see the new repo packages
-    res = run_command(task, "apt-get update", True)
+    res = apt_install(task, "azure-cli")
     if res.failed:
-        return SubTaskResult(success=False, message="Apt update failed")
-
-    res = run_command(task, "apt-get install -y azure-cli", True)
-    if res.failed:
-        return SubTaskResult(success=False, message="Apt install failed")
+        return SubTaskResult(success=False, message=f"Apt install failed: {res.result}")
 
     return SubTaskResult(success=True, message="Package installed")
 

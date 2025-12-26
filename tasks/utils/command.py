@@ -28,7 +28,7 @@ def run_command(task: Task, cmd: str, sudo: bool = False) -> Result:
     else:
         # CORRECTION: task.run returns a MultiResult (list).
         # We need to extract the single Result (index 0).
-        multi_result = task.run(task=send_command, command=cmd)
+        multi_result = task.run(task=send_command, command=cmd, )
         result = multi_result[0]
 
     # --- Advanced Error Handling ---
