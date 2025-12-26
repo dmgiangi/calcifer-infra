@@ -4,8 +4,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import fail, run_command
-from tasks.files import _write_file
+from tasks import fail, run_command, write_file
 
 
 # --- SUB-STEPS ---
@@ -43,7 +42,7 @@ def _configure_ssh_key(task: Task, local_path: str, remote_path: str) -> SubTask
 
     # 3. Write Remote File (Secure)
     # WARNING: Owned by root initially
-    res_write = _write_file(task, remote_path, key_content)
+    res_write = write_file(task, remote_path, key_content)
 
     if res_write.failed:
         return SubTaskResult(success=False, message="Failed to write remote key file")

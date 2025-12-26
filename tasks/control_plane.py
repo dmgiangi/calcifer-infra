@@ -4,9 +4,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import fail, run_command
-# Importiamo _write_file
-from tasks.files import _write_file
+from tasks import fail, run_command, write_file
 
 
 # --- SUB-STEPS ---
@@ -28,7 +26,7 @@ def _check_initialization(task: Task) -> SubTaskResult:
 @automated_substep("Generate Kubeadm Config")
 def _create_kubeadm_config(task: Task, pod_cidr: str) -> SubTaskResult:
     """
-    Creates /tmp/kubeadm-config.yaml using the secure _write_file utility.
+    Creates /tmp/kubeadm-config.yaml using the secure write_file utility.
     """
     node_ip = task.host.hostname
     node_name = task.host.name
@@ -47,9 +45,9 @@ kind: ClusterConfiguration
 networking:
   podSubnet: "{pod_cidr}"
 """
-    # USIAMO _write_file INVECE DI PRINTF
+    # USIAMO write_file INVECE DI PRINTF
     # Gestisce automaticamente MD5 check e scrittura sicura via base64
-    res = _write_file(task, "/tmp/kubeadm-config.yaml", config_content)
+    res = write_file(task, "/tmp/kubeadm-config.yaml", config_content)
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to write kubeadm-config.yaml")

@@ -2,8 +2,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import run_command, fail
-from tasks.files import _write_file
+from tasks import run_command, fail, write_file
 
 
 # --- SUB-STEPS ---
@@ -76,7 +75,7 @@ def _configure_azure_repo(task: Task) -> SubTaskResult:
         f"https://packages.microsoft.com/repos/azure-cli/ {codename} main\n"
     )
 
-    res = _write_file(task, repo_path, repo_content)
+    res = write_file(task, repo_path, repo_content)
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to write repo list file")
