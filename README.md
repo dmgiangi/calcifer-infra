@@ -1,44 +1,62 @@
-# Calcifer Infrastructure Manager
+# 🔥 Calcifer Infrastructure Manager
 
 Calcifer is a CLI automation tool designed to provision, manage, and tear down Kubernetes clusters and Azure Arc
-integrations.
+integrations. It is built on top of **Nornir** for hybrid orchestration (Local + SSH) and **Typer** for the CLI
+interface. The core architecture relies on a **Matrix Engine** that decouples technical tasks from high-level goals,
+ensuring modularity and idempotence.
 
-It is built on top of **Nornir** for hybrid orchestration (Local + SSH) and **Typer** for the CLI interface. The core
-architecture relies on a **Matrix Engine** that decouples technical tasks from high-level goals, ensuring modularity and
-idempotence.
+## 🚀 Key Features
 
-## 🚀 Features
+* **Hybrid Orchestration**: Built on Nornir and Scrapli, Calcifer seamlessly manages tasks on the local machine (via
+  subprocess) and remote nodes (via SSH).
+* **Modern CLI Interface**: A clean, user-friendly CLI powered by Typer and Rich, providing clear feedback, status
+  spinners, and beautiful output.
+* **Idempotent Kubernetes Provisioning**: Safely re-run provisioning tasks. The system uses Kubeadm for initialization
+  and Flannel for the CNI.
+* **GitOps Ready**: Automatically bootstraps FluxCD, connecting your cluster to a Git repository for declarative,
+  version-controlled management.
+* **Agentless Azure Arc Onboarding**: Projects your Kubernetes cluster into Azure Arc without needing to install the
+  `az` CLI on the remote cluster nodes. All cloud operations are executed from the local management machine.
+* **Secure by Design**: Features include atomic file writes to prevent corruption, hash-checking for idempotency, and
+  automatic cleanup of sensitive files (like SSH keys) from remote hosts after use.
 
-* **Matrix Orchestration**: Goals (Check, Init, Destroy) are mapped to Host Groups (Local, Control Plane, Workers) via a
-  central registry.
-* **Idempotent Design**: Provisioning commands can be safely re-run to ensure the desired state.
-* **Hybrid Execution**: Seamlessly manages tasks on the local machine (subprocess) and remote nodes (SSH/Scrapli).
-* **Rich UI & Logging**: clean, beautiful console output for the operator, with detailed technical logs saved to
-  `calcifer.log` for debugging.
-* **Type-Safe Configuration**: Centralized settings management using Python dataclasses.
+## 🏛️ Architecture
 
-## 📂 Project Structure
+Calcifer employs a **Matrix Engine** to orchestrate complex workflows. The logic is defined in `core/registry.py`, which
+maps high-level **Goals** (like `INIT` or `ARC`) to tasks that run on specific **Host Groups** (like `local_machine` or
+`k8s_control_plane`).
 
-```text
-.
-├── core/
-│   ├── engine.py       # The orchestrator that drives Nornir based on the Registry
-│   ├── registry.py     # Defines the "Goal x Group" task mapping
-│   ├── models.py       # Standardized result objects (OK, WARNING, FAILED)
-│   ├── settings.py     # Env var loading and configuration injection
-│   └── decorators.py   # Wrappers for logging and crash prevention
-├── tasks/              # Atomic, pure functions (business logic only)
-├── inventory/          # Nornir inventory (hosts.yaml, groups.yaml)
-├── utils/              # Logging utilities
-├── main.py             # CLI Entry point
-└── inventory_config.yaml         # Nornir configuration
+This decoupled design means that the engine (`core/engine.py`) simply executes the plan defined in the registry, making
+the entire workflow easy to understand, modify, and extend.
+
+```python
+# core/registry.py (Simplified)
+TASK_REGISTRY = {
+    "INIT": {
+        "local_machine": [check_dependencies, ...],
+        "k8s_control_plane": [prepare_node, install_containerd, init_control_plane, setup_fluxcd],
+        ...
+    },
+    "ARC": {
+        "local_machine": [check_azure_login, install_arc_agent],
+    }
+}
 ```
 
-## 🛠️ Installation
+## 📋 Prerequisites
+
+To use Calcifer, you need the following installed on your **local management machine**:
+
+* Python 3.9+
+* SSH client and network access to the remote nodes.
+* Azure CLI (`az`): For authentication and Arc-related tasks.
+* Kubectl: For post-init cluster operations.
+
+## ⚙️ Installation & Configuration
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/dmgiangi/calcifer-infra.git
+   git clone https://github.com/your-username/calcifer-infra.git
    cd calcifer-infra
    ```
 
@@ -47,76 +65,104 @@ idempotence.
    pip install -r requirements.txt
    ```
 
-3. **Setup Environment:**
-   Create a `.env` file in the root directory with your Azure details:
+3. **Set up Environment Variables:**
+   Create a `.env` file in the root directory. This is the most secure place for your Azure credentials.
    ```env
-   AZURE_SUBSCRIPTION_ID=your-subscription-id
-   AZURE_TENANT_ID=your-tenant-id
-   AZURE_LOCATION=westeurope
-   # Optional
-   ENV=dev
+   # .env
+   AZURE_SUBSCRIPTION_ID="your-subscription-id"
+   AZURE_TENANT_ID="your-tenant-id"
    ```
 
-## 🎮 Usage
+4. **Configure the Inventory:**
+   Edit `inventory/hosts.yaml` to define your target nodes.
+   ```yaml
+   # inventory/hosts.yaml
+   cp-node-01:
+     hostname: 192.168.1.100  # Use the actual IP address
+     groups:
+       - k8s_control_plane
 
-The CLI provides three main semantic commands. You can enable autocompletion by running
-`python main.py --install-completion`.
+   localhost:
+     hostname: 127.0.0.1
+     groups:
+       - local_machine
+   ```
 
-### 1. Verify (Read-Only)
+5. **Configure the Cluster:**
+   Edit `cluster_config.yaml` to define cluster-wide parameters and GitOps configuration.
+   ```yaml
+   # cluster_config.yaml
+   azure:
+     resource_group: "my-k8s-cluster-rg"
+     location: "westeurope"
 
-Runs pre-flight checks (connectivity, dependencies, authentication) across all relevant groups without modifying the
-system.
+   k8s:
+     version: "1.29"
+     flux:
+       enabled: true
+       github_url: "ssh://git@github.com/your-username/your-gitops-repo.git"
+       branch: "main"
+       cluster_path: "clusters/production"
+   ```
+
+## 🎮 Usage Workflow
+
+Calcifer's CLI provides semantic commands to guide you through the infrastructure lifecycle.
+
+### Step 1: 🛡️ Trust Remote Hosts
+
+For security, Nornir is configured to only connect to known SSH hosts. This command scans the remote hosts defined in
+your inventory and adds their keys to your local `~/.ssh/known_hosts` file.
 
 ```bash
-# Run verification on all hosts defined in the registry
-python main.py verify
-
-# Run only on a specific target
-python main.py verify --target calcifer
+python main.py trust
 ```
 
-### 2. Initialize (Provisioning)
+### Step 2: 🚀 Initialize the Cluster
 
-Executes the provisioning pipeline. This includes installing dependencies (like Azure CLI), configuring the OS,
-initializing Kubernetes, and connecting to Azure Arc.
+This is the main provisioning command. It executes the `INIT` goal, which performs the following sequence:
+
+1. **On the local machine**: Verifies dependencies like Azure CLI.
+2. **On the remote nodes**:
+    * Prepares the OS (disables swap, loads kernel modules).
+    * Installs `containerd`.
+    * Installs `kubeadm`, `kubelet`, and `kubectl`.
+    * Runs `kubeadm init` to create the control plane.
+    * Fetches the `admin.conf` to your local machine.
+    * Installs the Flannel CNI using the local `kubectl`.
+    * Bootstraps FluxCD if enabled.
 
 ```bash
 python main.py init
 ```
 
-### 3. Destroy (Teardown)
+### Step 3: ☁️ Connect to Azure Arc
 
-**Warning: Destructive Operation.**
-Disconnects the cluster from Azure Arc (cleaning up cloud resources) and resets the local/remote cluster configuration.
-Requires confirmation.
+This command executes the `ARC` goal, which connects the newly provisioned cluster to Azure. This entire process is *
+*agentless**—it runs from your local machine using the fetched `kubeconfig` and does not require `az` CLI on the cluster
+nodes.
 
 ```bash
-python main.py destroy
+python main.py connect-arc
 ```
 
-## ⚙️ Configuration & Extending
+## 📂 Project Structure
 
-### The Registry
-
-The logic of "who does what" is defined in `core/registry.py`. To add a new step to the provisioning process, simply add
-your task function to the appropriate list in the `TASK_REGISTRY` dictionary.
-
-```python
-"INIT": {
-    "local_machine": [ensure_azure_cli, ensure_azure_login],
-    "k8s_control_plane": [ensure_azure_cli, install_arc_agent]
-}
+```text
+.
+├── core/               # Core orchestration logic
+│   ├── engine.py       # The "Matrix Engine" that drives Nornir
+│   ├── registry.py     # Maps Goals to Tasks for each Host Group
+│   ├── models.py       # Standardized result objects (OK, FAILED, etc.)
+│   ├── settings.py     # Configuration loader (YAML + Env Vars)
+│   └── decorators.py   # Wrappers for tasks (logging, error handling, UI)
+├── tasks/              # Atomic, idempotent task functions
+├── inventory/          # Nornir inventory files
+│   ├── hosts.yaml      # Define your servers here
+│   └── groups.yaml     # Define host groups
+├── utils/              # Helper utilities like the file logger
+├── main.py             # Typer CLI application entrypoint
+├── cluster_config.yaml # Main configuration for your cluster
+├── requirements.txt    # Python dependencies
+└── calcifer.log        # Detailed log file for debugging
 ```
-
-### Adding New Tasks
-
-Create a new file in `tasks/`. Ensure your function:
-
-1. Accepts a Nornir `Task` object.
-2. Is decorated with `@automated_step`.
-3. Returns a `Result` containing a `StandardResult` model.
-
-## 📝 Logging
-
-* **Console**: Shows only high-level status (✅ OK, ⚠️ Warning, ❌ Failed) and progress.
-* **File**: Full technical details, stack traces, and debug info are written to `calcifer.log`.
