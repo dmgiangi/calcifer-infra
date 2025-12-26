@@ -4,6 +4,8 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
+# Importiamo _write_file
+from tasks.files import _write_file
 from tasks.utils import fail, run_command
 
 
@@ -26,10 +28,8 @@ def _check_initialization(task: Task) -> SubTaskResult:
 @automated_substep("Generate Kubeadm Config")
 def _create_kubeadm_config(task: Task, pod_cidr: str) -> SubTaskResult:
     """
-    Creates /tmp/kubeadm-config.yaml with dynamic Node IP and CIDR.
+    Creates /tmp/kubeadm-config.yaml using the secure _write_file utility.
     """
-    # task.host.hostname is the connection IP (ansible_host)
-    # task.host.name is the inventory name (inventory_hostname)
     node_ip = task.host.hostname
     node_name = task.host.name
 
@@ -47,12 +47,10 @@ kind: ClusterConfiguration
 networking:
   podSubnet: "{pod_cidr}"
 """
-    # Write to remote /tmp
-    # We use echo with heredoc-like structure or printf to handle newlines
-    # Using printf is safer for multiline variables
-    cmd = f"printf '{config_content}' > /tmp/kubeadm-config.yaml"
+    # USIAMO _write_file INVECE DI PRINTF
+    # Gestisce automaticamente MD5 check e scrittura sicura via base64
+    res = _write_file(task, "/tmp/kubeadm-config.yaml", config_content)
 
-    res = run_command(task, cmd)
     if res.failed:
         return SubTaskResult(success=False, message="Failed to write kubeadm-config.yaml")
 
@@ -62,18 +60,16 @@ networking:
 @automated_substep("Run Kubeadm Init")
 def _run_kubeadm_init(task: Task) -> SubTaskResult:
     """
-    Executes kubeadm init. This might take a while.
+    Executes kubeadm init.
     """
-    # Using sudo. --upload-certs is good practice for HA, added implicitly.
     cmd = "sudo kubeadm init --config /tmp/kubeadm-config.yaml --upload-certs"
 
-    # Increase timeout for this specific command as init can take time (pulling images)
-    # Note: Scrapli might need timeout adjustment in connection options, 
-    # but usually default is enough if images are cached.
     res = run_command(task, cmd)
 
+    # CLEANUP: Rimuoviamo il file di config dopo l'uso per sicurezza
+    run_command(task, "rm /tmp/kubeadm-config.yaml", sudo=True)
+
     if res.failed:
-        # Extract last lines of error for context
         return SubTaskResult(success=False, message=f"Init failed. Output: {res.result[-200:]}")
 
     return SubTaskResult(success=True, message="Control Plane Initialized")
@@ -95,7 +91,6 @@ def _setup_user_kubeconfig(task: Task) -> SubTaskResult:
         return SubTaskResult(success=False, message="Failed to copy kubeconfig")
 
     # 3. Fix permissions
-    # We use $(id -u):$(id -g) to get current user/group ID dynamically
     chown_cmd = "sudo chown $(id -u):$(id -g) $HOME/.kube/config"
     res_chown = run_command(task, chown_cmd)
 
@@ -122,8 +117,7 @@ def _install_cni(task: Task, manifest_url: str) -> SubTaskResult:
 @automated_substep("Untaint Control Plane")
 def _untaint_node(task: Task) -> SubTaskResult:
     """
-    Allows workloads to run on the Control Plane (Single Node Setup).
-    Handles 'not found' error gracefully.
+    Allows workloads to run on the Control Plane.
     """
     node_name = task.host.name
     cmd = f"kubectl taint nodes {node_name} node-role.kubernetes.io/control-plane:NoSchedule-"
@@ -143,7 +137,6 @@ def _fetch_kubeconfig_local(task: Task) -> SubTaskResult:
     """
     Reads the remote admin.conf and writes it to the LOCAL project directory.
     """
-    # 1. Read remote content
     cat_cmd = "sudo cat /etc/kubernetes/admin.conf"
     res_cat = run_command(task, cat_cmd)
 
@@ -152,7 +145,6 @@ def _fetch_kubeconfig_local(task: Task) -> SubTaskResult:
 
     remote_content = res_cat.result
 
-    # 2. Write locally
     local_path = Path("inventory/kubeconfig_admin.yaml")
     try:
         local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -171,41 +163,29 @@ def init_control_plane(task: Task) -> Result:
     """
     Initializes the K8s Control Plane (Kubeadm Init), Network, and Local Config.
     """
-    # Config retrieval
     config = task.host.get("app_config")
     pod_cidr = config["k8s"]["pod_network_cidr"]
     cni_url = config["k8s"]["cni_manifest_url"]
 
-    # 1. Check Status
     step_check = _check_initialization(task)
-    is_initialized = step_check.data  # Boolean
+    is_initialized = step_check.data
 
     if not is_initialized:
-        # --- FRESH INSTALL ---
-
-        # 2. Create Config
         s2 = _create_kubeadm_config(task, pod_cidr)
         if not s2.success: return fail(task, s2)
 
-        # 3. Kubeadm Init
         s3 = _run_kubeadm_init(task)
         if not s3.success: return fail(task, s3)
 
-    # --- CONVERGENCE (Run always) ---
-
-    # 4. Setup User Kubeconfig (Ensure ~/.kube/config exists)
     s4 = _setup_user_kubeconfig(task)
     if not s4.success: return fail(task, s4)
 
-    # 5. Install CNI
     s5 = _install_cni(task, cni_url)
     if not s5.success: return fail(task, s5)
 
-    # 6. Untaint (Optional, good for dev clusters)
     s6 = _untaint_node(task)
     if not s6.success: return fail(task, s6)
 
-    # 7. Fetch Config locally
     s7 = _fetch_kubeconfig_local(task)
     if not s7.success: return fail(task, s7)
 

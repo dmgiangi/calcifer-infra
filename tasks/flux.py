@@ -4,6 +4,8 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
+# Importiamo _write_file
+from tasks.files import _write_file
 from tasks.utils import fail, run_command
 
 
@@ -14,13 +16,10 @@ def _install_flux_cli(task: Task) -> SubTaskResult:
     """
     Downloads and installs the Flux CLI if not present.
     """
-    # Idempotency check
     check_cmd = "which flux"
     if not run_command(task, check_cmd).failed:
         return SubTaskResult(success=True, message="Flux CLI already installed")
 
-    # Install
-    # -s: silent, -S: show errors
     cmd = "curl -sS https://fluxcd.io/install.sh | sudo bash"
     res = run_command(task, cmd)
 
@@ -34,7 +33,7 @@ def _install_flux_cli(task: Task) -> SubTaskResult:
 def _configure_ssh_key(task: Task, local_path: str, remote_path: str) -> SubTaskResult:
     """
     Reads the PRIVATE key from the LOCAL controller and writes it to the REMOTE node.
-    Sets strict 0600 permissions.
+    Uses _write_file for secure transfer, then fixes permissions.
     """
     # 1. Read Local Key
     local_file = Path(local_path)
@@ -50,24 +49,26 @@ def _configure_ssh_key(task: Task, local_path: str, remote_path: str) -> SubTask
     remote_dir = str(Path(remote_path).parent)
     run_command(task, f"mkdir -p {remote_dir}")
 
-    # 3. Write Remote File
-    # We use a heredoc pattern to write the content safely via cat
-    # Note: We do NOT log the command here to prevent leaking the key in logs
-    # Using 'EOF' in quotes prevents variable expansion in the key
+    # 3. Write Remote File (Securely via Base64)
+    # WARNING: _write_file uses sudo, so file will be owned by root!
+    res_write = _write_file(task, remote_path, key_content)
 
-    # Escape single quotes just in case, though unlikely in standard keys
-    safe_content = key_content.replace("'", "'\\''")
-
-    write_cmd = f"cat << 'EOF' > {remote_path}\n{safe_content}\nEOF"
-
-    res_write = run_command(task, write_cmd)
     if res_write.failed:
         return SubTaskResult(success=False, message="Failed to write remote key file")
 
-    # 4. Set Permissions (0600)
-    res_chmod = run_command(task, f"chmod 0600 {remote_path}")
+    # 4. Fix Permissions & Ownership
+    # Since _write_file created it as root, we must sudo chmod/chown it.
+
+    # A. Set 600 (Root can still read/write)
+    res_chmod = run_command(task, f"chmod 0600 {remote_path}", sudo=True)
     if res_chmod.failed:
         return SubTaskResult(success=False, message="Failed to set key permissions")
+
+    # B. Set Owner to current user (so Flux can read it)
+    # We use $(id -u):$(id -g) to retrieve the current user's ID on the remote host
+    res_chown = run_command(task, f"chown $(id -u):$(id -g) {remote_path}", sudo=True)
+    if res_chown.failed:
+        return SubTaskResult(success=False, message="Failed to set key ownership")
 
     return SubTaskResult(success=True, message="SSH Key configured")
 
@@ -76,7 +77,6 @@ def _configure_ssh_key(task: Task, local_path: str, remote_path: str) -> SubTask
 def _bootstrap_flux(task: Task, config: dict) -> SubTaskResult:
     """
     Runs 'flux bootstrap git'.
-    Uses a marker file to ensure idempotency (avoid restarting bootstrap unnecessarily).
     """
     marker_file = "/var/lib/flux_bootstrapped"
 
@@ -91,10 +91,6 @@ def _bootstrap_flux(task: Task, config: dict) -> SubTaskResult:
     path = flux_conf["cluster_path"]
     key_path = flux_conf["remote_key_path"]
 
-    # We need KUBECONFIG env var. We prepend it to the command.
-    # Note: We use strict host key checking=no for automation, or we accept the risk.
-    # Flux usually handles known_hosts, but we pass the private key file explicitly.
-
     bootstrap_cmd = (
         f"export KUBECONFIG=/etc/kubernetes/admin.conf && "
         f"flux bootstrap git "
@@ -102,15 +98,13 @@ def _bootstrap_flux(task: Task, config: dict) -> SubTaskResult:
         f"--branch={branch} "
         f"--path={path} "
         f"--private-key-file={key_path} "
-        f"--silent"  # Reduce noise, we rely on exit code
+        f"--silent"
     )
 
-    # 3. Execute (This takes time)
-    # We might need to adjust timeout if connection is slow
+    # 3. Execute
     res = run_command(task, bootstrap_cmd)
 
     if res.failed:
-        # Return last lines of error
         err_snippet = res.result[-200:] if res.result else "Unknown Error"
         return SubTaskResult(success=False, message=f"Bootstrap failed: {err_snippet}")
 
