@@ -12,6 +12,7 @@ from tasks.utils import run_cmd
 def _ensure_hostname(task: Task, target_name: str) -> SubTaskResult:
     """
     Checks the current hostname and updates it using hostnamectl if different.
+    (This uses systemd API, so shell command is fine/standard here)
     """
     # 1. Check current hostname
     res = run_cmd(task, "hostname")
@@ -24,7 +25,6 @@ def _ensure_hostname(task: Task, target_name: str) -> SubTaskResult:
         return SubTaskResult(success=True, message=f"Hostname already set to '{target_name}'")
 
     # 2. Set new hostname
-    # We use sudo assuming the user has permissions
     set_cmd = f"sudo hostnamectl set-hostname {target_name}"
     res_set = run_cmd(task, set_cmd)
 
@@ -37,17 +37,13 @@ def _ensure_hostname(task: Task, target_name: str) -> SubTaskResult:
 @automated_substep("Configure /etc/hosts (127.0.0.1)")
 def _ensure_localhost_entry(task: Task) -> SubTaskResult:
     """
-    Ensures '127.0.0.1 localhost' exists using Python logic.
+    Ensures '127.0.1.1 localhost' exists using Python logic.
     """
-    # Vogliamo assicurarci che ci sia "127.0.0.1 localhost"
-    # Usiamo una regex per trovare se c'è già una definizione per 127.0.0.1
-    # Se c'è, la sostituiamo/aggiorniamo o controlliamo se localhost è presente.
-    # Per semplicità, e come da specifica ansible: ensure line exists.
-
     target_line = "127.0.0.1 localhost"
-    # Cerchiamo riga che inizia con 127.0.0.1
+    # Regex to check if a definition already exists, even partial
     regex = r"^127\.0\.0\.1\s+localhost"
 
+    # ensure_line_in_file handles reading, matching and atomic writing
     res = ensure_line_in_file(task, "/etc/hosts", target_line, match_regex=regex)
 
     if res.failed:
@@ -61,9 +57,10 @@ def _ensure_localhost_entry(task: Task) -> SubTaskResult:
 def _ensure_resolution_entry(task: Task, target_name: str) -> SubTaskResult:
     """
     Ensures '127.0.1.1 <hostname>' exists, replacing old entries.
+    Safe replacement without using 'sed'.
     """
     target_line = f"127.0.1.1 {target_name}"
-    # Regex: Qualsiasi riga che inizia con 127.0.1.1
+    # Regex: Look for any line starting with 127.0.1.1 followed by spaces
     regex = r"^127\.0\.1\.1\s+"
 
     res = ensure_line_in_file(task, "/etc/hosts", target_line, match_regex=regex)
@@ -82,7 +79,6 @@ def set_hostname_and_hosts(task: Task) -> Result:
     """
     Sets the system hostname to match the inventory name and updates /etc/hosts.
     """
-    # The target hostname is the name defined in hosts.yaml
     target_hostname = task.host.name
 
     # 1. Set System Hostname
@@ -100,10 +96,17 @@ def set_hostname_and_hosts(task: Task) -> Result:
     if not step_res.success:
         return Result(host=task.host, failed=True, result=StandardResult(TaskStatus.FAILED, step_res.message))
 
+    # Determine if anything changed for the final report
+    is_changed = (
+            "changed" in step_host.message or
+            "updated" in step_lo.message.lower() or
+            "set to" in step_res.message.lower()
+    )
+
     return Result(
         host=task.host,
         result=StandardResult(
-            status=TaskStatus.CHANGED if "changed" in step_host.message or "Updated" in step_res.message else TaskStatus.OK,
-            message=f"Hostname set to {target_hostname} & /etc/hosts updated"
+            status=TaskStatus.CHANGED if is_changed else TaskStatus.OK,
+            message=f"Hostname set to {target_hostname} & /etc/hosts verified"
         )
     )

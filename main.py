@@ -24,10 +24,10 @@ def main(
     Calcifer Infrastructure CLI.
     Common entry point for all commands.
     """
-    # 1. Impostiamo lo stato globale in base al flag
+    # 1. Set global state based on flag
     global_config.VERBOSE = verbose
 
-    # 2. Mostriamo il banner (solo se non stiamo chiedendo aiuto o completamento)
+    # 2. Show banner (only if not asking for help or completion)
     if ctx.invoked_subcommand:
         subtitle = "v2.0 - Matrix Engine"
         if verbose:
@@ -40,8 +40,8 @@ def main(
         ))
 
 
-# ... I comandi verify, init, destroy rimangono UGUALI ...
-# Typer gestisce il fatto che --verbose sia globale.
+# ... verify, init, destroy commands remain the SAME ...
+# Typer handles --verbose being global.
 
 @app.command()
 def verify(

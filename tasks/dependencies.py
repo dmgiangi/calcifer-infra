@@ -2,7 +2,6 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-# Assicurati di aver creato tasks/files.py come discusso nel passo precedente
 from tasks.files import _write_file
 from tasks.utils import run_cmd, fail
 

@@ -7,7 +7,7 @@ from tasks.utils import run_local
 
 
 def _read_file(task: Task, path: str) -> str:
-    """Legge un file remoto o locale e ritorna il contenuto."""
+    """Reads a remote or local file and returns the content."""
     cmd = f"sudo cat {path}"
 
     if task.host.platform == "linux_local":
@@ -16,36 +16,36 @@ def _read_file(task: Task, path: str) -> str:
         res = task.run(task=send_command, command=cmd)
 
     if res.failed:
-        # Se il file non esiste, ritorniamo stringa vuota (o gestiamo diversamente)
+        # If the file doesn't exist, return an empty string (or handle differently)
         return ""
     return res.result
 
 
 def _write_file(task: Task, path: str, content: str) -> Result:
     """
-    Scrive il contenuto su un file remoto (usando tee per i permessi sudo).
-    Ritorna un Result che indica se è stato cambiato o no.
+    Writes content to a remote file (using tee for sudo permissions).
+    Returns a Result indicating whether it was changed or not.
     """
-    # 1. Calcola hash del nuovo contenuto
+    # 1. Calculate hash of the new content
     new_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
 
-    # 2. Leggi contenuto attuale (per idempotenza)
+    # 2. Read current content (for idempotency)
     current_content = _read_file(task, path)
     current_hash = hashlib.md5(current_content.encode('utf-8')).hexdigest()
 
     if new_hash == current_hash:
         return Result(host=task.host, changed=False, result="File is up to date")
 
-    # 3. Scrittura (usiamo una tecnica sicura con heredoc e quote per evitare injection)
-    # Esempio: cat << 'EOF' > file ...
-    # Attenzione: bisogna gestire i caratteri speciali nel content.
-    # Un metodo robusto per file piccoli/medi è usare printf o base64 per evitare problemi di escaping.
+    # 3. Write (using a secure technique with heredoc and quotes to avoid injection)
+    # Example: cat << 'EOF' > file ...
+    # Note: special characters in content must be handled.
+    # A robust method for small/medium files is using printf or base64 to avoid escaping issues.
 
-    # Usiamo base64 per evitare qualsiasi problema di escaping bash
+    # Use base64 to avoid any bash escaping issues
     import base64
     b64_content = base64.b64encode(content.encode('utf-8')).decode('utf-8')
 
-    # Comando: decodifica base64 e scrivi su file tramite tee
+    # Command: decode base64 and write to file via tee
     cmd = f"echo '{b64_content}' | base64 -d | sudo tee {path} > /dev/null"
 
     if task.host.platform == "linux_local":
@@ -58,9 +58,9 @@ def _write_file(task: Task, path: str, content: str) -> Result:
 
 def ensure_line_in_file(task: Task, path: str, line: str, match_regex: str = None) -> Result:
     """
-    Assicura che una riga sia presente.
-    Se match_regex è fornito, sostituisce la riga che matcha.
-    Altrimenti appende in fondo.
+    Ensures that a line is present.
+    If match_regex is provided, replaces the matching line.
+    Otherwise appends at the end.
     """
     import re
 
@@ -73,14 +73,14 @@ def ensure_line_in_file(task: Task, path: str, line: str, match_regex: str = Non
         regex = re.compile(match_regex)
         for l in lines:
             if regex.search(l):
-                new_lines.append(line)  # Sostituisci
+                new_lines.append(line)  # Replace
                 found = True
             else:
-                new_lines.append(l)  # Mantieni
+                new_lines.append(l)  # Keep
         if not found:
-            new_lines.append(line)  # Aggiungi se non trovato
+            new_lines.append(line)  # Add if not found
     else:
-        # Ricerca esatta
+        # Exact search
         if line in lines:
             return Result(host=task.host, changed=False, result="Line already exists")
         new_lines = lines + [line]

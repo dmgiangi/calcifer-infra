@@ -67,53 +67,53 @@ def automated_substep(step_name: str):
         def wrapper(task: Task, *args, **kwargs) -> SubTaskResult:
             host_name = task.host.name
 
-            # LOG SU FILE (Sempre)
+            # FILE LOG (Always)
             sys_logger.info(f"[{host_name}] [SUB-START] '{step_name}'")
 
             result = None
             error_to_raise = None
 
-            # --- ESECUZIONE ---
+            # --- EXECUTION ---
             try:
                 if global_config.VERBOSE:
-                    # UI MODE: Mostra spinner temporaneo
-                    # Quando questo blocco finisce, la riga sparisce
+                    # UI MODE: Show temporary spinner
+                    # When this block ends, the line disappears
                     with console.status(f"    [dim]🔹 {step_name}...[/dim]", spinner="dots"):
                         result = func(task, *args, **kwargs)
                 else:
-                    # SILENT MODE: Esegue e basta
+                    # SILENT MODE: Just execute
                     result = func(task, *args, **kwargs)
 
             except Exception as e:
-                # Catturiamo l'eccezione per gestirla dopo
+                # Capture exception to handle it later
                 error_to_raise = e
 
-            # --- GESTIONE RISULTATO E UI FINALE ---
+            # --- RESULT MANAGEMENT AND FINAL UI ---
 
-            # Caso 1: CRASH (Eccezione)
+            # Case 1: CRASH (Exception)
             if error_to_raise:
                 error_msg = f"Exception in '{step_name}': {str(error_to_raise)}"
                 sys_logger.error(f"[{host_name}] [SUB-CRASH] {error_msg}", exc_info=True)
 
                 if global_config.VERBOSE:
-                    # La riga dello spinner è sparita, stampiamo l'errore statico
+                    # The spinner line is gone, print static error
                     console.print(f"    [bold red]💥 CRASH {step_name}[/bold red]: {str(error_to_raise)}")
 
                 return SubTaskResult(success=False, message=error_msg)
 
-            # Caso 2: ESECUZIONE COMPLETATA (Success o Fail logico)
+            # Case 2: EXECUTION COMPLETED (Logical Success or Fail)
             status_log = "OK" if result.success else "FAIL"
             log_msg = f"[{host_name}] [SUB-END] '{step_name}' -> {status_log} ({result.message})"
 
             if result.success:
                 sys_logger.info(log_msg)
                 if global_config.VERBOSE:
-                    # Stampa la spunta verde al posto dello spinner
+                    # Print green checkmark instead of spinner
                     console.print(f"    [green]✔[/green] [dim]{step_name}[/dim]")
             else:
                 sys_logger.warning(log_msg)
                 if global_config.VERBOSE:
-                    # Stampa la X rossa con il messaggio di errore
+                    # Print red X with error message
                     console.print(f"    [red]✖ {step_name}[/red]: [dim]{result.message}[/dim]")
 
             return result
