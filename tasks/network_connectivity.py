@@ -1,7 +1,7 @@
 from nornir.core.task import Task, Result
 
 from core.decorators import automated_step
-from core.engine import console
+from core.decorators import console
 from core.models import TaskStatus, StandardResult
 from tasks import run_command
 

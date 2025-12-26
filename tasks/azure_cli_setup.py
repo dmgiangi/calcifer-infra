@@ -111,6 +111,15 @@ def ensure_azure_cli(task: Task) -> Result:
     """
     Orchestrates the installation of Azure CLI.
     """
+    # 0. Check if Azure CLI is already installed
+    if not run_command(task, "which az").failed:
+        return Result(
+            host=task.host,
+            result=StandardResult(
+                status=TaskStatus.OK,
+                message="Azure CLI already installed (binary found), skipping installation steps."
+            )
+        )
 
     # 1. Prerequisites
     s1 = _install_prerequisites(task)
