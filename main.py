@@ -24,10 +24,6 @@ def main(
             False, "--quiet", "-q",
             help="Disable detailed sub-step logging (Silent Mode)."
         ),
-        sudo_pass: bool = typer.Option(
-            False, "--ask-become-pass", "-K",
-            help="Prompt for sudo password (become) for privileged tasks."
-        ),
         config_file: Path = typer.Option(
             "calcifer_config.yaml", "--config", "-c",
             help="Path to the configuration YAML file.",
@@ -43,10 +39,6 @@ def main(
     global_config.CONFIG_FILE = str(config_file)
 
     # 2. Handle Sudo Password
-    if sudo_pass:
-        password = typer.prompt("Sudo Password", hide_input=True)
-        global_config.SUDO_PASSWORD = password
-
     # 3. Show Banner (unless help/completion)
     if ctx.invoked_subcommand:
         subtitle = "v2.0 - Matrix Engine"
