@@ -2,6 +2,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
+from tasks.files import ensure_line_in_file
 from tasks.utils import run_cmd
 
 
@@ -36,59 +37,42 @@ def _ensure_hostname(task: Task, target_name: str) -> SubTaskResult:
 @automated_substep("Configure /etc/hosts (127.0.0.1)")
 def _ensure_localhost_entry(task: Task) -> SubTaskResult:
     """
-    Ensures '127.0.0.1 localhost' exists.
-    Equivalent to Ansible lineinfile with state=present.
+    Ensures '127.0.0.1 localhost' exists using Python logic.
     """
-    # Idempotency check: grep for the exact line
-    check_cmd = "grep -q '^127.0.0.1\\s\\+localhost' /etc/hosts"
-    res = run_cmd(task, check_cmd)
+    # Vogliamo assicurarci che ci sia "127.0.0.1 localhost"
+    # Usiamo una regex per trovare se c'è già una definizione per 127.0.0.1
+    # Se c'è, la sostituiamo/aggiorniamo o controlliamo se localhost è presente.
+    # Per semplicità, e come da specifica ansible: ensure line exists.
 
-    if not res.failed:
-        return SubTaskResult(success=True, message="Localhost entry present")
+    target_line = "127.0.0.1 localhost"
+    # Cerchiamo riga che inizia con 127.0.0.1
+    regex = r"^127\.0\.0\.1\s+localhost"
 
-    # If missing, append it
-    # We generally don't want to delete existing 127.0.0.1 lines if they have other aliases,
-    # but strictly ensuring localhost is present.
-    update_cmd = "echo '127.0.0.1 localhost' | sudo tee -a /etc/hosts"
-    res_upd = run_cmd(task, update_cmd)
+    res = ensure_line_in_file(task, "/etc/hosts", target_line, match_regex=regex)
 
-    if res_upd.failed:
-        return SubTaskResult(success=False, message="Failed to append localhost entry")
+    if res.failed:
+        return SubTaskResult(success=False, message="Failed to update /etc/hosts")
 
-    return SubTaskResult(success=True, message="Localhost entry added")
+    msg = "Localhost entry updated" if res.changed else "Localhost entry present"
+    return SubTaskResult(success=True, message=msg)
 
 
 @automated_substep("Configure /etc/hosts (127.0.1.1)")
 def _ensure_resolution_entry(task: Task, target_name: str) -> SubTaskResult:
     """
-    Ensures '127.0.1.1 <hostname>' exists.
-    Replaces any existing 127.0.1.1 entry to avoid duplicates.
+    Ensures '127.0.1.1 <hostname>' exists, replacing old entries.
     """
-    # 1. Check if the CORRECT entry already exists
-    # grep -q exits with 0 if found, 1 if not
-    check_cmd = f"grep -q '^127.0.1.1\\s\\+{target_name}$' /etc/hosts"
-    res = run_cmd(task, check_cmd)
+    target_line = f"127.0.1.1 {target_name}"
+    # Regex: Qualsiasi riga che inizia con 127.0.1.1
+    regex = r"^127\.0\.1\.1\s+"
 
-    if not res.failed:
-        return SubTaskResult(success=True, message=f"Entry '127.0.1.1 {target_name}' present")
+    res = ensure_line_in_file(task, "/etc/hosts", target_line, match_regex=regex)
 
-    # 2. Update Logic
-    # Strategy: Remove ANY existing 127.0.1.1 line using sed, then append the correct one.
-    # This prevents drift (e.g., if hostname changed, we remove the old entry).
+    if res.failed:
+        return SubTaskResult(success=False, message="Failed to update resolution IP")
 
-    # Step A: Remove old line (if any)
-    # || true ensures it doesn't fail if line is missing
-    clean_cmd = "sudo sed -i '/^127.0.1.1/d' /etc/hosts"
-    run_cmd(task, clean_cmd)
-
-    # Step B: Append new line
-    add_cmd = f"echo '127.0.1.1 {target_name}' | sudo tee -a /etc/hosts"
-    res_add = run_cmd(task, add_cmd)
-
-    if res_add.failed:
-        return SubTaskResult(success=False, message="Failed to update /etc/hosts")
-
-    return SubTaskResult(success=True, message=f"Updated 127.0.1.1 to {target_name}")
+    msg = f"Resolution entry set to {target_name}" if res.changed else "Resolution entry correct"
+    return SubTaskResult(success=True, message=msg)
 
 
 # --- MAIN TASK ---
