@@ -58,26 +58,31 @@ def _setup_microsoft_gpg(task: Task) -> SubTaskResult:
 @automated_substep("Configure Azure CLI Repo")
 def _configure_azure_repo(task: Task) -> SubTaskResult:
     """
-    Creates the apt sources list file using atomic write.
+    Creates the apt sources list file dynamically based on OS facts.
     """
+    # Recuperiamo i facts salvati in precedenza
+    facts = task.host.get("os_facts")
+    if not facts:
+        return SubTaskResult(success=False, message="OS Facts not found. Run 'gather_system_facts' first.")
+
+    arch = facts["arch"]  # es. amd64, arm64
+    codename = facts["codename"]  # es. jammy, focal, noble, bookworm
+
     repo_path = "/etc/apt/sources.list.d/azure-cli.list"
 
-    # Note: We are hardcoding 'jammy' here as per your original script.
-    # To make it dynamic, we could use $(lsb_release -cs) but requires handling in Python.
-    # Keeping it simple and robust for now.
+    # Costruzione dinamica della stringa
     repo_content = (
-        "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] "
-        "https://packages.microsoft.com/repos/azure-cli/ jammy main\n"
+        f"deb [arch={arch} signed-by=/etc/apt/keyrings/microsoft.gpg] "
+        f"https://packages.microsoft.com/repos/azure-cli/ {codename} main\n"
     )
 
-    # _write_file handles hashing (md5) and atomic write via base64
     res = _write_file(task, repo_path, repo_content)
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to write repo list file")
 
-    status_msg = "Repo list updated" if res.changed else "Repo list up-to-date"
-    return SubTaskResult(success=True, message=status_msg)
+    msg = f"Repo list updated for {codename}/{arch}" if res.changed else "Repo list up-to-date"
+    return SubTaskResult(success=True, message=msg)
 
 
 @automated_substep("Install Azure CLI Package")

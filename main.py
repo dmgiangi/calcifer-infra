@@ -40,9 +40,6 @@ def main(
         ))
 
 
-# ... verify, init, destroy commands remain the SAME ...
-# Typer handles --verbose being global.
-
 @app.command()
 def verify(
         target: str = typer.Option(

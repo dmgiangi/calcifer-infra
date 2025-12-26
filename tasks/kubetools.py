@@ -1,9 +1,10 @@
-from typing import List
 from nornir.core.task import Task, Result
-from tasks.utils import run_local, fail, run_cmd
-from nornir_scrapli.tasks import send_command
-from core.models import TaskStatus, StandardResult, SubTaskResult
+
 from core.decorators import automated_step, automated_substep
+from core.models import TaskStatus, StandardResult, SubTaskResult
+from tasks.files import _write_file
+from tasks.utils import fail, run_cmd
+
 
 def _get_k8s_version(task: Task) -> str:
     """Helper to retrieve and format K8s version (e.g., 'v1.29')."""
@@ -64,28 +65,31 @@ def _setup_k8s_key(task: Task, k8s_version: str) -> SubTaskResult:
 @automated_substep("Add Kubernetes Repository")
 def _add_k8s_repo(task: Task, k8s_version: str) -> SubTaskResult:
     """
-    Adds the signed repository to sources.list.d.
+    Adds the signed repository dynamically via OS Facts.
     """
-    repo_file = "/etc/apt/sources.list.d/kubernetes.list"
+    facts = task.host.get("os_facts")
+    if not facts:
+        return SubTaskResult(success=False, message="Missing OS Facts")
 
-    # Check existence
-    if not run_cmd(task, f"test -f {repo_file}").failed:
-        return SubTaskResult(success=True, message="Repo file already exists")
+    # Kubetools repo è standard per debian/ubuntu, ma l'architettura è importante
+    arch = facts["arch"]
 
-    # Construct repo string
-    # Format: deb [signed-by=...] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /
-    repo_line = (
-        f"deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] "
-        f"https://pkgs.k8s.io/core:/stable:/{k8s_version}/deb/ /"
+    repo_path = "/etc/apt/sources.list.d/kubernetes.list"
+
+    # Formato: deb [signed-by=...] https://.../ /
+    # Aggiungiamo [arch=...] per robustezza
+    repo_content = (
+        f"deb [arch={arch} signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] "
+        f"https://pkgs.k8s.io/core:/stable:/{k8s_version}/deb/ /\n"
     )
 
-    cmd = f"echo '{repo_line}' | sudo tee {repo_file}"
-    res = run_cmd(task, cmd)
+    res = _write_file(task, repo_path, repo_content)
 
     if res.failed:
-        return SubTaskResult(success=False, message="Failed to add repo file")
+        return SubTaskResult(success=False, message="Failed to write k8s repo file")
 
-    return SubTaskResult(success=True, message=f"Repo added for {k8s_version}")
+    msg = f"K8s Repo set for {k8s_version} ({arch})" if res.changed else "K8s Repo up-to-date"
+    return SubTaskResult(success=True, message=msg)
 
 
 @automated_substep("Install Kube Tools")

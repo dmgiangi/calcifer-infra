@@ -1,18 +1,9 @@
 from nornir.core.task import Task, Result
-from nornir_scrapli.tasks import send_command
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks.utils import run_local, fail
-
-
-# --- HELPER ---
-def _run_cmd(task: Task, cmd: str):
-    """Executes shell command locally or via SSH based on platform."""
-    if task.host.platform == "linux_local":
-        return task.run(task=run_local, command=cmd)
-    else:
-        return task.run(task=send_command, command=cmd)
+from tasks.files import _write_file, ensure_line_in_file
+from tasks.utils import fail, run_cmd
 
 
 # --- SUB-STEPS ---
@@ -20,91 +11,87 @@ def _run_cmd(task: Task, cmd: str):
 @automated_substep("Install Dependencies")
 def _install_deps(task: Task) -> SubTaskResult:
     """
-    Installs prerequisites (curl, gnupg, lsb-release, etc.).
+    Installs prerequisites for fetching repositories over HTTPS.
     """
-    pkgs = "ca-certificates curl gnupg apt-transport-https software-properties-common lsb-release"
-    # -y for auto-yes, -qq for quiet
+    pkgs = "ca-certificates curl gnupg apt-transport-https software-properties-common"
     cmd = f"sudo apt-get update && sudo apt-get install -y {pkgs}"
 
-    res = _run_cmd(task, cmd)
+    res = run_cmd(task, cmd)
     if res.failed:
         return SubTaskResult(success=False, message="Failed to install dependencies")
-
     return SubTaskResult(success=True, message="Dependencies installed")
 
 
 @automated_substep("Setup Docker GPG Key")
-def _setup_gpg(task: Task) -> SubTaskResult:
+def _setup_gpg(task: Task, distro_id: str) -> SubTaskResult:
     """
     Downloads and dearmors the Docker GPG key if not present.
     """
     keyring_path = "/etc/apt/keyrings/docker.gpg"
 
-    # 1. Check if key exists
-    check_cmd = f"test -f {keyring_path}"
-    if not _run_cmd(task, check_cmd).failed:
+    # 1. Idempotency Check
+    if not run_cmd(task, f"test -f {keyring_path}").failed:
         return SubTaskResult(success=True, message="GPG Key already present")
 
-    # 2. Setup directory
-    _run_cmd(task, "sudo mkdir -p /etc/apt/keyrings")
+    # 2. Prepare Directory
+    run_cmd(task, "sudo mkdir -p /etc/apt/keyrings")
 
-    # 3. Download & Dearmor (Pipeline)
-    url = "https://download.docker.com/linux/ubuntu/gpg"
-    # curl -> gpg dearmor -> tee to file
+    # 3. Download & Dearmor
+    # Note: Docker usually serves the key at the same path for linux distros, 
+    # but using the distro_id ensures correctness.
+    url = f"https://download.docker.com/linux/{distro_id}/gpg"
+
     cmd = f"curl -fsSL {url} | sudo gpg --dearmor -o {keyring_path}"
 
-    res = _run_cmd(task, cmd)
+    res = run_cmd(task, cmd)
     if res.failed:
-        return SubTaskResult(success=False, message="Failed to download/dearmor GPG key")
+        return SubTaskResult(success=False, message=f"Failed to download GPG key from {url}")
 
-    # Ensure permissions
-    _run_cmd(task, f"sudo chmod a+r {keyring_path}")
+    # 4. Set Permissions
+    run_cmd(task, f"sudo chmod a+r {keyring_path}")
 
     return SubTaskResult(success=True, message="GPG Key setup complete")
 
 
-@automated_substep("Add Docker Repository")
+@automated_substep("Configure Docker Repository")
 def _add_repo(task: Task) -> SubTaskResult:
     """
-    Adds the Docker/Containerd repository to sources.list.d.
+    Generates the sources.list file dynamically based on OS Facts (Arch/Distro).
     """
-    repo_file = "/etc/apt/sources.list.d/docker.list"
+    facts = task.host.get("os_facts")
+    if not facts:
+        return SubTaskResult(success=False, message="Missing OS Facts. Run 'gather_system_facts' first.")
 
-    # Check if file exists
-    if not _run_cmd(task, f"test -f {repo_file}").failed:
-        return SubTaskResult(success=True, message="Repository file already exists")
+    distro_id = facts["id"]  # e.g., ubuntu, debian
+    codename = facts["codename"]  # e.g., jammy, bookworm
+    arch = facts["arch"]  # e.g., amd64, arm64
 
-    # Determine Architecture and OS Release dynamically
-    # We assume standard Ubuntu/Debian structure here as per Ansible role
+    repo_path = "/etc/apt/sources.list.d/docker.list"
 
-    # Get codename (e.g., jammy, focal)
-    res_rel = _run_cmd(task, "lsb_release -cs")
-    if res_rel.failed:
-        return SubTaskResult(success=False, message="Failed to detect OS release")
-    codename = res_rel.result.strip()
-
-    repo_line = (
-        f"deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] "
-        f"https://download.docker.com/linux/ubuntu {codename} stable"
+    # Construct the repo line dynamically
+    repo_content = (
+        f"deb [arch={arch} signed-by=/etc/apt/keyrings/docker.gpg] "
+        f"https://download.docker.com/linux/{distro_id} {codename} stable\n"
     )
 
-    cmd = f"echo '{repo_line}' | sudo tee {repo_file}"
-    res = _run_cmd(task, cmd)
+    # Atomic write using our secure helper
+    res = _write_file(task, repo_path, repo_content)
 
     if res.failed:
-        return SubTaskResult(success=False, message="Failed to add repository file")
+        return SubTaskResult(success=False, message="Failed to write docker.list")
 
-    return SubTaskResult(success=True, message="Repository added")
+    msg = f"Repo added for {distro_id}/{codename} ({arch})" if res.changed else "Repo up-to-date"
+    return SubTaskResult(success=True, message=msg)
 
 
-@automated_substep("Install Containerd")
+@automated_substep("Install Containerd Package")
 def _install_containerd(task: Task) -> SubTaskResult:
     """
-    Installs the containerd.io package.
+    Updates apt cache and installs containerd.io.
     """
-    # Force update to ensure the new repo is read
+    # Force update to ensure the new repo is picked up
     cmd = "sudo apt-get update && sudo apt-get install -y containerd.io"
-    res = _run_cmd(task, cmd)
+    res = run_cmd(task, cmd)
 
     if res.failed:
         return SubTaskResult(success=False, message="Apt install failed")
@@ -115,49 +102,46 @@ def _install_containerd(task: Task) -> SubTaskResult:
 @automated_substep("Configure Containerd (config.toml)")
 def _configure_containerd(task: Task) -> SubTaskResult:
     """
-    Generates default config and applies K8s specific settings (SystemdCgroup).
+    Generates default config and enables SystemdCgroup.
     """
     config_path = "/etc/containerd/config.toml"
 
     # 1. Generate Default Config if missing
-    # We create the dir just in case
-    _run_cmd(task, "sudo mkdir -p /etc/containerd")
+    run_cmd(task, "sudo mkdir -p /etc/containerd")
 
-    # We check if file exists. 
-    # NOTE: If you want to FORCE reset the config every time, remove the check.
-    # For idempotency with safety, we check first.
-    exists = not _run_cmd(task, f"test -f {config_path}").failed
+    exists = not run_cmd(task, f"test -f {config_path}").failed
 
     if not exists:
         gen_cmd = f"containerd config default | sudo tee {config_path}"
-        if _run_cmd(task, gen_cmd).failed:
+        if run_cmd(task, gen_cmd).failed:
             return SubTaskResult(success=False, message="Failed to generate default config")
 
-    # 2. Apply SystemdCgroup = true
-    # Equivalent to Ansible replace module
-    # sed -i 's/search_pattern/replacement/g' file
-    sed_cgroup = "sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' " + config_path
-    res_sed = _run_cmd(task, sed_cgroup)
+    # 2. Patch: SystemdCgroup = true
+    # We use ensure_line_in_file with regex to replace the existing setting
+    target_line = "            SystemdCgroup = true"
+    regex = r"\s*SystemdCgroup\s*=\s*false"
 
-    # 3. Ensure CRI is not disabled
-    # Equivalent to Ansible lineinfile state=absent
-    # We remove lines matching "disabled_plugins.*cri"
-    sed_cri = "sudo sed -i '/disabled_plugins.*cri/d' " + config_path
-    _run_cmd(task, sed_cri)
+    res_patch = ensure_line_in_file(task, config_path, target_line, match_regex=regex)
 
-    if res_sed.failed:
+    # 3. Cleanup: Ensure CRI plugin is not disabled (sanity check)
+    # Using sed for deletion is simpler here as ensure_line_in_file adds/replaces
+    sed_cri = f"sudo sed -i '/disabled_plugins.*cri/d' {config_path}"
+    run_cmd(task, sed_cri)
+
+    if res_patch.failed:
         return SubTaskResult(success=False, message="Failed to patch config.toml")
 
-    return SubTaskResult(success=True, message="Config patched (SystemdCgroup=true)")
+    msg = "Config patched (SystemdCgroup=true)" if res_patch.changed else "Config already correct"
+    return SubTaskResult(success=True, message=msg)
 
 
 @automated_substep("Restart Containerd Service")
 def _restart_service(task: Task) -> SubTaskResult:
     """
-    Restarts and enables containerd.
+    Restarts and enables the containerd service.
     """
     cmd = "sudo systemctl restart containerd && sudo systemctl enable containerd"
-    res = _run_cmd(task, cmd)
+    res = run_cmd(task, cmd)
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to restart service")
@@ -171,17 +155,21 @@ def _restart_service(task: Task) -> SubTaskResult:
 def install_containerd(task: Task) -> Result:
     """
     Full pipeline to setup Containerd as CRI for Kubernetes.
+    Supports multi-arch and multi-distro via OS Facts.
     """
+    # Retrieve OS Facts for dynamic configuration
+    facts = task.host.get("os_facts")
+    distro_id = facts.get("id", "ubuntu") if facts else "ubuntu"
 
     # 1. Dependencies
     s1 = _install_deps(task)
     if not s1.success: return fail(task, s1)
 
     # 2. GPG Key
-    s2 = _setup_gpg(task)
+    s2 = _setup_gpg(task, distro_id)
     if not s2.success: return fail(task, s2)
 
-    # 3. Repo
+    # 3. Repository
     s3 = _add_repo(task)
     if not s3.success: return fail(task, s3)
 
@@ -200,7 +188,7 @@ def install_containerd(task: Task) -> Result:
     return Result(
         host=task.host,
         result=StandardResult(
-            status=TaskStatus.CHANGED,
+            status=TaskStatus.CHANGED,  # Usually implies state enforcement
             message="Containerd installed, configured (SystemdCgroup) & running."
         )
     )
