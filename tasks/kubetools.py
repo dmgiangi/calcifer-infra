@@ -70,13 +70,13 @@ def _add_k8s_repo(task: Task, k8s_version: str) -> SubTaskResult:
     if not facts:
         return SubTaskResult(success=False, message="Missing OS Facts")
 
-    # Kubetools repo è standard per debian/ubuntu, ma l'architettura è importante
+    # Kubetools repo is standard for debian/ubuntu, but architecture is important
     arch = facts["arch"]
 
     repo_path = "/etc/apt/sources.list.d/kubernetes.list"
 
     # Formato: deb [signed-by=...] https://.../ /
-    # Aggiungiamo [arch=...] per robustezza
+    # We add [arch=...] for robustness
     repo_content = (
         f"deb [arch={arch} signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] "
         f"https://pkgs.k8s.io/core:/stable:/{k8s_version}/deb/ /\n"

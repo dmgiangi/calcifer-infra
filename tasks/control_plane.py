@@ -1,3 +1,5 @@
+import os
+import subprocess
 from pathlib import Path
 
 from nornir.core.task import Task, Result
@@ -11,9 +13,6 @@ from tasks import fail, run_command, write_file
 
 @automated_substep("Check Cluster Status")
 def _check_initialization(task: Task) -> SubTaskResult:
-    """
-    Checks if /etc/kubernetes/admin.conf exists to determine if init is needed.
-    """
     cmd = "test -f /etc/kubernetes/admin.conf"
     res = run_command(task, cmd)
 
@@ -25,9 +24,6 @@ def _check_initialization(task: Task) -> SubTaskResult:
 
 @automated_substep("Generate Kubeadm Config")
 def _create_kubeadm_config(task: Task, pod_cidr: str) -> SubTaskResult:
-    """
-    Creates /tmp/kubeadm-config.yaml using the secure write_file utility.
-    """
     node_ip = task.host.hostname
     node_name = task.host.name
 
@@ -45,8 +41,6 @@ kind: ClusterConfiguration
 networking:
   podSubnet: "{pod_cidr}"
 """
-    # USIAMO write_file INVECE DI PRINTF
-    # Gestisce automaticamente MD5 check e scrittura sicura via base64
     res = write_file(task, "/tmp/kubeadm-config.yaml", config_content)
 
     if res.failed:
@@ -57,14 +51,10 @@ networking:
 
 @automated_substep("Run Kubeadm Init")
 def _run_kubeadm_init(task: Task) -> SubTaskResult:
-    """
-    Executes kubeadm init.
-    """
     cmd = "sudo kubeadm init --config /tmp/kubeadm-config.yaml --upload-certs"
-
     res = run_command(task, cmd)
 
-    # CLEANUP: Rimuoviamo il file di config dopo l'uso per sicurezza
+    # CLEANUP
     run_command(task, "rm /tmp/kubeadm-config.yaml", sudo=True)
 
     if res.failed:
@@ -73,68 +63,12 @@ def _run_kubeadm_init(task: Task) -> SubTaskResult:
     return SubTaskResult(success=True, message="Control Plane Initialized")
 
 
-@automated_substep("Setup User Kubeconfig")
-def _setup_user_kubeconfig(task: Task) -> SubTaskResult:
-    """
-    Copies admin.conf to ~/.kube/config and sets permissions for the current user.
-    """
-    # 1. Create directory
-    run_command(task, "mkdir -p $HOME/.kube")
-
-    # 2. Copy file (requires sudo to read source)
-    cp_cmd = "sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config"
-    res_cp = run_command(task, cp_cmd)
-
-    if res_cp.failed:
-        return SubTaskResult(success=False, message="Failed to copy kubeconfig")
-
-    # 3. Fix permissions
-    chown_cmd = "sudo chown $(id -u):$(id -g) $HOME/.kube/config"
-    res_chown = run_command(task, chown_cmd)
-
-    if res_chown.failed:
-        return SubTaskResult(success=False, message="Failed to set permissions")
-
-    return SubTaskResult(success=True, message="User kubeconfig configured")
-
-
-@automated_substep("Install CNI Plugin")
-def _install_cni(task: Task, manifest_url: str) -> SubTaskResult:
-    """
-    Applies the CNI manifest (Flannel).
-    """
-    cmd = f"kubectl apply -f {manifest_url}"
-    res = run_command(task, cmd)
-
-    if res.failed:
-        return SubTaskResult(success=False, message="Failed to apply CNI manifest")
-
-    return SubTaskResult(success=True, message="CNI Plugin installed")
-
-
-@automated_substep("Untaint Control Plane")
-def _untaint_node(task: Task) -> SubTaskResult:
-    """
-    Allows workloads to run on the Control Plane.
-    """
-    node_name = task.host.name
-    cmd = f"kubectl taint nodes {node_name} node-role.kubernetes.io/control-plane:NoSchedule-"
-
-    res = run_command(task, cmd)
-
-    if res.failed:
-        if "not found" in res.result:
-            return SubTaskResult(success=True, message="Taint already removed")
-        return SubTaskResult(success=False, message=f"Failed to untaint: {res.result}")
-
-    return SubTaskResult(success=True, message="Control Plane untainted")
-
-
 @automated_substep("Fetch Admin Config")
-def _fetch_kubeconfig_local(task: Task) -> SubTaskResult:
+def _fetch_kubeconfig_local(task: Task, local_path_str: str) -> SubTaskResult:
     """
-    Reads the remote admin.conf and writes it to the LOCAL project directory.
+    Reads remote admin.conf and writes it to the configured LOCAL path.
     """
+    # 1. Read Remote
     cat_cmd = "sudo cat /etc/kubernetes/admin.conf"
     res_cat = run_command(task, cat_cmd)
 
@@ -143,15 +77,89 @@ def _fetch_kubeconfig_local(task: Task) -> SubTaskResult:
 
     remote_content = res_cat.result
 
-    local_path = Path("inventory/kubeconfig_admin.yaml")
+    # 2. Write Local (using configured path)
+    local_path = Path(local_path_str)
     try:
         local_path.parent.mkdir(parents=True, exist_ok=True)
         with open(local_path, "w") as f:
             f.write(remote_content)
+        os.chmod(local_path, 0o600)
     except Exception as e:
         return SubTaskResult(success=False, message=f"Failed to write local file: {e}")
 
     return SubTaskResult(success=True, message=f"Saved to {local_path}")
+
+
+@automated_substep("Setup User Kubeconfig (Remote)")
+def _setup_user_kubeconfig(task: Task) -> SubTaskResult:
+    run_command(task, "mkdir -p $HOME/.kube")
+    cp_cmd = "sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config"
+    res_cp = run_command(task, cp_cmd)
+
+    if res_cp.failed:
+        return SubTaskResult(success=False, message="Failed to copy kubeconfig")
+
+    chown_cmd = "sudo chown $(id -u):$(id -g) $HOME/.kube/config"
+    res_chown = run_command(task, chown_cmd)
+
+    if res_chown.failed:
+        return SubTaskResult(success=False, message="Failed to set permissions")
+
+    return SubTaskResult(success=True, message="Remote User kubeconfig configured")
+
+
+@automated_substep("Install CNI Plugin (Local)")
+def _install_cni(task: Task, manifest_url: str, kubeconfig_path: str) -> SubTaskResult:
+    """
+    Applies CNI locally using the configured kubeconfig path.
+    """
+    if not Path(kubeconfig_path).exists():
+        return SubTaskResult(success=False, message=f"Local kubeconfig not found at {kubeconfig_path}")
+
+    cmd = f"export KUBECONFIG={Path(kubeconfig_path).absolute()} && kubectl apply -f {manifest_url}"
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True
+        )
+        if proc.returncode != 0:
+            return SubTaskResult(success=False, message=f"CNI Install Failed: {proc.stderr}")
+    except Exception as e:
+        return SubTaskResult(success=False, message=f"Local execution error: {e}")
+
+    return SubTaskResult(success=True, message="CNI Plugin installed via Local Kubectl")
+
+
+@automated_substep("Untaint Control Plane (Local)")
+def _untaint_node(task: Task, kubeconfig_path: str) -> SubTaskResult:
+    """
+    Untaints node locally using the configured kubeconfig path.
+    """
+    node_name = task.host.name
+
+    cmd = (
+        f"export KUBECONFIG={Path(kubeconfig_path).absolute()} && "
+        f"kubectl taint nodes {node_name} node-role.kubernetes.io/control-plane:NoSchedule-"
+    )
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True
+        )
+        if proc.returncode != 0 and "not found" not in proc.stderr:
+            return SubTaskResult(success=False, message=f"Untaint Failed: {proc.stderr}")
+    except Exception as e:
+        return SubTaskResult(success=False, message=f"Local execution error: {e}")
+
+    return SubTaskResult(success=True, message="Control Plane untainted via Local Kubectl")
 
 
 # --- MAIN TASK ---
@@ -159,12 +167,16 @@ def _fetch_kubeconfig_local(task: Task) -> SubTaskResult:
 @automated_step("Initialize Control Plane")
 def init_control_plane(task: Task) -> Result:
     """
-    Initializes the K8s Control Plane (Kubeadm Init), Network, and Local Config.
+    Initializes K8s CP and configures it locally using paths from Settings.
     """
     config = task.host.get("app_config")
+
+    # Retrieve parameters from Settings
     pod_cidr = config["k8s"]["pod_network_cidr"]
     cni_url = config["k8s"]["cni_manifest_url"]
+    local_kube_path = config["k8s"]["local_kubeconfig_path"]  # <--- FROM SETTINGS
 
+    # 1. Check Status
     step_check = _check_initialization(task)
     is_initialized = step_check.data
 
@@ -175,19 +187,23 @@ def init_control_plane(task: Task) -> Result:
         s3 = _run_kubeadm_init(task)
         if not s3.success: return fail(task, s3)
 
-    s4 = _setup_user_kubeconfig(task)
+    # 4. Fetch Config (We pass the configured path)
+    s4 = _fetch_kubeconfig_local(task, local_kube_path)
     if not s4.success: return fail(task, s4)
 
-    s5 = _install_cni(task, cni_url)
+    # 5. Remote User Config
+    s5 = _setup_user_kubeconfig(task)
     if not s5.success: return fail(task, s5)
 
-    s6 = _untaint_node(task)
+    # 6. Install CNI (We pass the configured path)
+    s6 = _install_cni(task, cni_url, local_kube_path)
     if not s6.success: return fail(task, s6)
 
-    s7 = _fetch_kubeconfig_local(task)
+    # 7. Untaint (We pass the configured path)
+    s7 = _untaint_node(task, local_kube_path)
     if not s7.success: return fail(task, s7)
 
-    status_msg = "Cluster Initialized" if not is_initialized else "Cluster Already Up (Verified CNI/Taints)"
+    status_msg = "Cluster Initialized & Configured" if not is_initialized else "Cluster Already Up"
 
     return Result(
         host=task.host,

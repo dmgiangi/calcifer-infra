@@ -28,7 +28,7 @@ class FluxSettings:
     github_url: str = ""
     branch: str = "main"
     cluster_path: str = ""
-    # Defaults structurali (possono essere sovrascritti da YAML)
+    # Structural defaults (can be overridden by YAML)
     local_key_path: str = "./config/flux_identity"
     remote_key_path: str = "/home/calcifer/.ssh/flux_identity"
 
@@ -40,6 +40,7 @@ class K8sSettings:
     pod_network_cidr: str = "10.244.0.0/16"
     cni_manifest_url: str = "https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml"
 
+    local_kubeconfig_path: str = "inventory/kubeconfig_admin.yaml"
     flux: FluxSettings = field(default_factory=FluxSettings)
 
     # Empty defaults: Le liste reali devono essere nel calcifer_config.yaml
@@ -70,11 +71,11 @@ def load_settings(config_path: str = "calcifer_config.yaml") -> AppSettings:
             with open(path, 'r') as f:
                 file_config = yaml.safe_load(f) or {}
         except Exception as e:
-            # Loggiamo su stdout/stderr poiché il logger potrebbe non essere ancora pronto
+            # We log to stdout/stderr since the logger might not be ready yet
             print(f"[Warning] Failed to load {config_path}: {e}")
 
     # 2. Load Environment Variables (Secrets & Overrides)
-    # Mappiamo manualmente solo le chiavi che ha senso sovrascrivere via ENV
+    # We manually map only the keys that make sense to override via ENV
     env_config = {
         "environment": os.getenv("ENV"),
         "azure": {
@@ -88,7 +89,7 @@ def load_settings(config_path: str = "calcifer_config.yaml") -> AppSettings:
         }
     }
 
-    # Pulizia: Rimuoviamo chiavi None/Empty dai dizionari ENV
+    # Cleanup: We remove None/Empty keys from ENV dictionaries
     def clean_none(d: Union[Dict, None]):
         if not isinstance(d, dict): return d
         return {k: clean_none(v) for k, v in d.items() if v is not None and v != {}}
@@ -101,13 +102,13 @@ def load_settings(config_path: str = "calcifer_config.yaml") -> AppSettings:
     az_defaults = {"location": "westeurope", "resource_group": "calcifer-rg"}
     az_file = file_config.get("azure", {})
     az_env = env_config.get("azure", {})
-    # Priorità: Env > File > Defaults
+    # Priority: Env > File > Defaults
     az_final = {**az_defaults, **az_file, **az_env}
 
     if not az_final.get("subscription_id"):
         raise ValueError("Missing Critical Config: AZURE_SUBSCRIPTION_ID (env or yaml)")
 
-    # Filtriamo solo le chiavi note per evitare errori di init
+    # We filter only known keys to avoid init errors
     azure_obj = AzureSettings(**{k: v for k, v in az_final.items() if k in AzureSettings.__annotations__})
 
     # --- Kubernetes ---
@@ -118,19 +119,19 @@ def load_settings(config_path: str = "calcifer_config.yaml") -> AppSettings:
     k8s_file = file_config.get("k8s", {})
     k8s_env = env_config.get("k8s", {})
 
-    # Gestione Flux annidato
+    # Nested Flux management
     flux_defaults = {"enabled": False}
     flux_file = k8s_file.get("flux", {})
     flux_final = {**flux_defaults, **flux_file}
     flux_obj = FluxSettings(**{k: v for k, v in flux_final.items() if k in FluxSettings.__annotations__})
 
-    # Rimuoviamo 'flux' dal dict k8s prima del merge finale per gestirlo come oggetto
+    # We remove 'flux' from the k8s dict before the final merge to handle it as an object
     if "flux" in k8s_file: del k8s_file["flux"]
 
     k8s_final = {**k8s_defaults, **k8s_file, **k8s_env}
 
     k8s_args = {k: v for k, v in k8s_final.items() if k in K8sSettings.__annotations__}
-    k8s_args["flux"] = flux_obj  # Iniettiamo l'oggetto FluxSettings
+    k8s_args["flux"] = flux_obj  # We inject the FluxSettings object
 
     k8s_obj = K8sSettings(**k8s_args)
 

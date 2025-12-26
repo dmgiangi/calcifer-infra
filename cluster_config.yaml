@@ -8,12 +8,14 @@ k8s:
   version: "1.29"
   pod_network_cidr: "10.244.0.0/16"
 
-  # Lista complessa (non gestibile via ENV)
+  local_kubeconfig_path: "inventory/my_custom_kubeconfig.yaml"
+
+  # Complex list (not manageable via ENV)
   kernel_modules:
     - overlay
     - br_netfilter
 
-  # Dizionario complesso
+  # Complex dictionary
   sysctl_params:
     net.bridge.bridge-nf-call-ip6tables: "1"
     net.bridge.bridge-nf-call-iptables: "1"

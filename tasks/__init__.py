@@ -23,7 +23,7 @@ def run_command(task: Task, cmd: str, sudo: bool = False) -> Result:
     # --- SUDO WRAPPING LOGIC ---
     if sudo:
         if global_config.SUDO_PASSWORD:
-            # Escaping basico per la password (single quotes)
+            # Basic escaping for the password (single quotes)
             pw = global_config.SUDO_PASSWORD.replace("'", "'\\''")
 
             # echo 'PASS' | sudo -S -p '' cmd
@@ -35,19 +35,19 @@ def run_command(task: Task, cmd: str, sudo: bool = False) -> Result:
 
     # --- EXECUTION ---
     if task.host.platform == "linux_local":
-        return _run_local_subprocess(task, cmd)
+        return run_local_subprocess(task, cmd)
     else:
-        # CORREZIONE: task.run ritorna un MultiResult (lista).
-        # Dobbiamo estrarre il singolo Result (indice 0).
+        # CORRECTION: task.run returns a MultiResult (list).
+        # We need to extract the single Result (index 0).
         multi_result = task.run(task=send_command, command=cmd)
         return multi_result[0]
 
 
-def _run_local_subprocess(task: Task, command: str) -> Result:
+def run_local_subprocess(task: Task, command: str) -> Result:
     """Internal helper for local execution."""
 
-    # Se il comando contiene pipe, è più sicuro usare shell=True
-    # (ma attenzione all'escaping se l'input fosse non fidato).
+    # If the command contains pipes, it is safer to use shell=True
+    # (but be careful with escaping if the input is untrusted).
     use_shell = "|" in command
 
     try:
@@ -60,7 +60,7 @@ def _run_local_subprocess(task: Task, command: str) -> Result:
                 universal_newlines=True
             )
         else:
-            # Senza pipe, usiamo shlex.split per sicurezza
+            # Without pipes, we use shlex.split for safety
             proc = subprocess.run(
                 shlex.split(command),
                 stdout=subprocess.PIPE,

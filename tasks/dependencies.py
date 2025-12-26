@@ -59,7 +59,7 @@ def _configure_azure_repo(task: Task) -> SubTaskResult:
     """
     Creates the apt sources list file dynamically based on OS facts.
     """
-    # Recuperiamo i facts salvati in precedenza
+    # We retrieve the previously saved facts
     facts = task.host.get("os_facts")
     if not facts:
         return SubTaskResult(success=False, message="OS Facts not found. Run 'gather_system_facts' first.")
@@ -69,7 +69,7 @@ def _configure_azure_repo(task: Task) -> SubTaskResult:
 
     repo_path = "/etc/apt/sources.list.d/azure-cli.list"
 
-    # Costruzione dinamica della stringa
+    # Dynamic string construction
     repo_content = (
         f"deb [arch={arch} signed-by=/etc/apt/keyrings/microsoft.gpg] "
         f"https://packages.microsoft.com/repos/azure-cli/ {codename} main\n"

@@ -73,7 +73,7 @@ def trust():
 
     # 1. Load Inventory (Lightweight init)
     try:
-        # Usa il file di config Nornir standard (che punta a hosts.yaml/groups.yaml)
+        # Use the standard Nornir config file (which points to hosts.yaml/groups.yaml)
         nr = InitNornir(config_file="inventory_config.yaml")
     except Exception as e:
         rprint(f"[bold red]❌ Config Error:[/bold red] {e}")
@@ -83,7 +83,7 @@ def trust():
 
     # 2. Iterate over hosts
     for name, host in nr.inventory.hosts.items():
-        # Saltiamo localhost o connessioni locali
+        # We skip localhost or local connections
         if host.hostname in ["127.0.0.1", "localhost"] or host.platform == "linux_local":
             continue
 
@@ -170,6 +170,21 @@ def destroy(
 
     engine = MatrixEngine()
     engine.run(goal="DESTROY")
+
+
+@app.command(name="connect-arc")
+def connect_arc(
+        target: str = typer.Option(
+            None, "--target", "-t",
+            help="Specific host/cluster to connect (uses inventory name)."
+        )
+):
+    """
+    [Azure] Connects the initialized cluster to Azure Arc.
+    Requires 'init' to be run first (needs inventory/kubeconfig_admin.yaml).
+    """
+    engine = MatrixEngine()
+    engine.run(goal="ARC", target_filter=target)
 
 
 if __name__ == "__main__":
