@@ -15,10 +15,20 @@ def _install_flux_cli(task: Task) -> SubTaskResult:
     if not run_command(task, check_cmd).failed:
         return SubTaskResult(success=True, message="Flux CLI already installed")
 
-    cmd = "curl -sS https://fluxcd.io/install.sh | sudo bash"
-    res = run_command(task, cmd)
+    install_script_path = "/tmp/install_flux.sh"
+    download_cmd = f"curl -sS https://fluxcd.io/install.sh -o {install_script_path}"
+    res_download = run_command(task, download_cmd)
+    if res_download.failed:
+        return SubTaskResult(success=False, message="Failed to download Flux CLI install script")
 
-    if res.failed:
+    run_command(task, f"chmod +x {install_script_path}")
+
+    install_cmd = f"sudo {install_script_path}"
+    res_install = run_command(task, install_cmd)
+
+    run_command(task, f"rm {install_script_path}")
+
+    if res_install.failed:
         return SubTaskResult(success=False, message="Failed to install Flux CLI")
 
     return SubTaskResult(success=True, message="Flux CLI installed")
@@ -41,15 +51,12 @@ def _configure_ssh_key(task: Task, local_path: str, remote_path: str) -> SubTask
     run_command(task, f"mkdir -p {remote_dir}")
 
     # 3. Write Remote File (Secure)
-    # WARNING: Owned by root initially
-    res_write = write_file(task, remote_path, key_content)
+    user = task.host.username
+    owner = f"{user}:{user}"
+    res_write = write_file(task, remote_path, key_content, owner=owner, permissions="0600")
 
     if res_write.failed:
         return SubTaskResult(success=False, message="Failed to write remote key file")
-
-    # 4. Fix Permissions & Ownership (Secure 600)
-    run_command(task, f"chmod 0600 {remote_path}", sudo=True)
-    run_command(task, f"chown $(id -u):$(id -g) {remote_path}", sudo=True)
 
     return SubTaskResult(success=True, message="SSH Key configured")
 
@@ -92,7 +99,7 @@ def _bootstrap_flux(task: Task, config: dict) -> SubTaskResult:
         err_snippet = res.result[-200:] if res.result else "Unknown Error"
         return SubTaskResult(success=False, message=f"Bootstrap failed: {err_snippet}")
 
-    run_command(task, f"touch {marker_file}", sudo=True)
+    write_file(task, marker_file, "bootstrapped")
 
     return SubTaskResult(success=True, message="Flux Bootstrapped (Key cleaned up)")
 

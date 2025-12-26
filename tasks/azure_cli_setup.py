@@ -30,6 +30,7 @@ def _setup_microsoft_gpg(task: Task) -> SubTaskResult:
     Downloads and dearmors the Microsoft GPG key if not present.
     """
     keyring_path = "/etc/apt/keyrings/microsoft.gpg"
+    temp_key_path = "/tmp/microsoft.gpg.asc"
 
     # 1. Idempotency Check: Don't download if exists
     # We use 'test -f' via shell
@@ -39,16 +40,24 @@ def _setup_microsoft_gpg(task: Task) -> SubTaskResult:
     # 2. Ensure directory exists
     run_command(task, "mkdir -p /etc/apt/keyrings", True)
 
-    # 3. Download & Dearmor
-    # Pipeline: curl -> gpg -> tee
+    # 3. Download
     url = "https://packages.microsoft.com/keys/microsoft.asc"
-    cmd = f"curl -sLS {url} | gpg --dearmor | sudo tee {keyring_path} > /dev/null"
-
-    res = run_command(task, cmd)
-    if res.failed:
+    download_cmd = f"curl -sLS {url} -o {temp_key_path}"
+    res_download = run_command(task, download_cmd)
+    if res_download.failed:
         return SubTaskResult(success=False, message="Failed to download/dearmor GPG key")
 
-    # 4. Secure permissions (readable by apt)
+    # 4. Dearmor
+    dearmor_cmd = f"gpg --dearmor -o {keyring_path} {temp_key_path}"
+    res_dearmor = run_command(task, dearmor_cmd, sudo=True)
+
+    # 5. Cleanup
+    run_command(task, f"rm {temp_key_path}")
+
+    if res_dearmor.failed:
+        return SubTaskResult(success=False, message="Failed to dearmor GPG key")
+
+    # 6. Secure permissions (readable by apt)
     run_command(task, f"chmod go+r {keyring_path}", True)
 
     return SubTaskResult(success=True, message="GPG Key setup complete")

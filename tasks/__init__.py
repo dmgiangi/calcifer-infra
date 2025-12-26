@@ -119,10 +119,11 @@ from nornir.core.task import Task, Result
 # Assicurati di importare run_command e read_file correttamente dal tuo progetto
 
 
-def write_file(task: Task, path: str, content: str) -> Result:
+def write_file(task: Task, path: str, content: str, owner: str = "root:root", permissions: str = "644") -> Result:
     """
     Writes content to a remote file using SCP (Stage 1) and Sudo Move (Stage 2).
     Includes automatic VERSIONED BACKUP of the existing file before overwriting.
+    Accepts optional owner and permissions.
     """
     # 1. Calcolo Hash (Idempotenza)
     new_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
@@ -198,8 +199,12 @@ def write_file(task: Task, path: str, content: str) -> Result:
             run_command(task, f"rm {remote_temp_path}")
             return Result(host=task.host, failed=True, result=f"Move failed: {res_move.result}")
 
-        # 5. Fix Owner (Opzionale, rimetti root se necessario)
-        run_command(task, f"chown root:root {path}", sudo=True)
+        # 5. Fix Owner and Permissions
+        chown_cmd = f"chown {owner} {path}"
+        run_command(task, chown_cmd, sudo=True)
+
+        chmod_cmd = f"chmod {permissions} {path}"
+        run_command(task, chmod_cmd, sudo=True)
 
         return Result(host=task.host, changed=True, result=f"File updated (Backup saved)")
     except Exception as e:

@@ -2,7 +2,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import fail, run_command, write_file, ensure_line_in_file
+from tasks import fail, run_command, write_file, read_file
 
 
 # --- SUB-STEPS ---
@@ -27,6 +27,7 @@ def _setup_gpg(task: Task, distro_id: str) -> SubTaskResult:
     Downloads and dearmors the Docker GPG key if not present.
     """
     keyring_path = "/etc/apt/keyrings/docker.gpg"
+    temp_key_path = "/tmp/docker.gpg.asc"
 
     # 1. Idempotency Check
     if not run_command(task, f"test -f {keyring_path}").failed:
@@ -35,18 +36,24 @@ def _setup_gpg(task: Task, distro_id: str) -> SubTaskResult:
     # 2. Prepare Directory
     run_command(task, "mkdir -p /etc/apt/keyrings", True)
 
-    # 3. Download & Dearmor
-    # Note: Docker usually serves the key at the same path for linux distros, 
-    # but using the distro_id ensures correctness.
+    # 3. Download
     url = f"https://download.docker.com/linux/{distro_id}/gpg"
-
-    cmd = f"curl -fsSL {url} | sudo gpg --dearmor -o {keyring_path}"
-
-    res = run_command(task, cmd)
-    if res.failed:
+    download_cmd = f"curl -fsSL {url} -o {temp_key_path}"
+    res_download = run_command(task, download_cmd)
+    if res_download.failed:
         return SubTaskResult(success=False, message=f"Failed to download GPG key from {url}")
 
-    # 4. Set Permissions
+    # 4. Dearmor
+    dearmor_cmd = f"gpg --dearmor -o {keyring_path} {temp_key_path}"
+    res_dearmor = run_command(task, dearmor_cmd, sudo=True)
+
+    # 5. Cleanup
+    run_command(task, f"rm {temp_key_path}")
+
+    if res_dearmor.failed:
+        return SubTaskResult(success=False, message="Failed to dearmor GPG key")
+
+    # 6. Set Permissions
     run_command(task, f"chmod a+r {keyring_path}", True)
 
     return SubTaskResult(success=True, message="GPG Key setup complete")
@@ -104,6 +111,7 @@ def _configure_containerd(task: Task) -> SubTaskResult:
     Generates default config and enables SystemdCgroup.
     """
     config_path = "/etc/containerd/config.toml"
+    import re
 
     # 1. Generate Default Config if missing
     run_command(task, "mkdir -p /etc/containerd", True)
@@ -111,21 +119,25 @@ def _configure_containerd(task: Task) -> SubTaskResult:
     exists = not run_command(task, f"test -f {config_path}").failed
 
     if not exists:
-        gen_cmd = f"containerd config default | sudo tee {config_path}"
-        if run_command(task, gen_cmd).failed:
+        gen_cmd = "containerd config default"
+        res_gen = run_command(task, gen_cmd)
+        if res_gen.failed:
             return SubTaskResult(success=False, message="Failed to generate default config")
 
-    # 2. Patch: SystemdCgroup = true
-    # We use ensure_line_in_file with regex to replace the existing setting
-    target_line = "            SystemdCgroup = true"
-    regex = r"\s*SystemdCgroup\s*=\s*false"
+        res_write = write_file(task, config_path, res_gen.result)
+        if res_write.failed:
+            return SubTaskResult(success=False, message=f"Failed to write config file: {res_write.result}")
 
-    res_patch = ensure_line_in_file(task, config_path, target_line, match_regex=regex)
+    # 2. Patch: SystemdCgroup = true and remove disabled_plugins for cri
+    content = read_file(task, config_path)
 
-    # 3. Cleanup: Ensure CRI plugin is not disabled (sanity check)
-    # Using sed for deletion is simpler here as ensure_line_in_file adds/replaces
-    sed_cri = f"sudo sed -i '/disabled_plugins.*cri/d' {config_path}"
-    run_command(task, sed_cri)
+    # Enable SystemdCgroup
+    content = re.sub(r"(\s*SystemdCgroup\s*=\s*)false", r"\1true", content)
+
+    # Remove CRI from disabled_plugins
+    content = re.sub(r'(disabled_plugins\s*=\s*\[.*)("cri",?.*\])', r'\1]', content)
+
+    res_patch = write_file(task, config_path, content)
 
     if res_patch.failed:
         return SubTaskResult(success=False, message="Failed to patch config.toml")

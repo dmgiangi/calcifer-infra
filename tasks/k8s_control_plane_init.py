@@ -6,7 +6,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import fail, run_command, write_file
+from tasks import fail, run_command, write_file, read_file
 
 
 # --- SUB-STEPS ---
@@ -69,13 +69,10 @@ def _fetch_kubeconfig_local(task: Task, local_path_str: str) -> SubTaskResult:
     Reads remote admin.conf and writes it to the configured LOCAL path.
     """
     # 1. Read Remote
-    cat_cmd = "sudo cat /etc/kubernetes/admin.conf"
-    res_cat = run_command(task, cat_cmd)
+    remote_content = read_file(task, "/etc/kubernetes/admin.conf")
 
-    if res_cat.failed:
-        return SubTaskResult(success=False, message="Failed to read remote admin.conf")
-
-    remote_content = res_cat.result
+    if not remote_content:
+        return SubTaskResult(success=False, message="Failed to read remote admin.conf or file is empty")
 
     # 2. Write Local (using configured path)
     local_path = Path(local_path_str)

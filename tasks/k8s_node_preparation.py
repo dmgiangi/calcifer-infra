@@ -1,10 +1,11 @@
+import re
 from typing import List, Dict
 
 from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import run_command, fail
+from tasks import run_command, fail, write_file, read_file
 
 
 # --- SUB-STEPS ---
@@ -17,16 +18,13 @@ def _load_kernel_modules(task: Task, modules: List[str]) -> SubTaskResult:
     failed_mods = []
 
     # 1. Create persistence file
-    # We construct the file content string
-    file_content = "\n".join(modules)
+    file_content = "\n".join(modules) + "\n"  # Add trailing newline
 
-    # Write to /etc/modules-load.d/k8s.conf
-    # usage of tee ensures sudo permissions apply to the write operation
-    echo_cmd = f"echo '{file_content}' | sudo tee /etc/modules-load.d/k8s.conf"
-    res_persist = run_command(task, echo_cmd)
+    # Write to /etc/modules-load.d/k8s.conf using robust write_file
+    res_persist = write_file(task, "/etc/modules-load.d/k8s.conf", file_content)
 
     if res_persist.failed:
-        return SubTaskResult(success=False, message="Failed to write modules config file")
+        return SubTaskResult(success=False, message=f"Failed to write modules config: {res_persist.result}")
 
     # 2. Runtime Load (modprobe)
     for mod in modules:
@@ -36,7 +34,7 @@ def _load_kernel_modules(task: Task, modules: List[str]) -> SubTaskResult:
 
         if res_check.failed:
             # Not loaded, load it now
-            res_load = run_command(task, f"modprobe {mod}", True)
+            res_load = run_command(task, f"modprobe {mod}", sudo=True)
             if res_load.failed:
                 failed_mods.append(mod)
 
@@ -53,18 +51,17 @@ def _configure_sysctl(task: Task, params: Dict[str, str]) -> SubTaskResult:
     """
     # 1. Prepare file content
     lines = [f"{key} = {value}" for key, value in params.items()]
-    content = "\n".join(lines)
+    content = "\n".join(lines) + "\n"
 
-    # 2. Write to /etc/sysctl.d/k8s.conf
-    write_cmd = f"echo '{content}' | sudo tee /etc/sysctl.d/k8s.conf"
-    res_write = run_command(task, write_cmd)
+    # 2. Write to /etc/sysctl.d/k8s.conf using robust write_file
+    res_write = write_file(task, "/etc/sysctl.d/k8s.conf", content)
 
     if res_write.failed:
-        return SubTaskResult(success=False, message="Failed to write sysctl config")
+        return SubTaskResult(success=False, message=f"Failed to write sysctl config: {res_write.result}")
 
     # 3. Apply changes (Reload)
     # --system loads settings from all system configuration files
-    res_reload = run_command(task, "sysctl --system", True)
+    res_reload = run_command(task, "sysctl --system", sudo=True)
 
     if res_reload.failed:
         return SubTaskResult(success=False, message="Failed to reload sysctl")
@@ -86,7 +83,7 @@ def _disable_swap_runtime(task: Task) -> SubTaskResult:
         return SubTaskResult(success=True, message="Swap already disabled")
 
     # Disable it
-    res_off = run_command(task, "swapoff -a", True)
+    res_off = run_command(task, "swapoff -a", sudo=True)
     if res_off.failed:
         return SubTaskResult(success=False, message="Failed to run swapoff")
 
@@ -97,19 +94,43 @@ def _disable_swap_runtime(task: Task) -> SubTaskResult:
 def _disable_swap_fstab(task: Task) -> SubTaskResult:
     """
     Comments out swap entries in /etc/fstab to persist across reboots.
+    Uses read-modify-write pattern with write_file (ensures backup).
     """
-    # sed command to comment out lines containing 'swap' that are not already commented
-    # regex explanation:
-    # /^[^#].*swap/  -> Look for lines NOT starting with # that contain 'swap'
-    # s/^/# /        -> Substitute start of line with '# '
-    sed_cmd = "sudo sed -i '/^[^#].*swap/ s/^/# /' /etc/fstab"
+    fstab_path = "/etc/fstab"
 
-    res = run_command(task, sed_cmd)
+    # 1. Read current content
+    current_content = read_file(task, fstab_path)
+    if not current_content:
+        # Se fallisce la lettura o è vuoto (improbabile per fstab), meglio fermarsi
+        return SubTaskResult(success=False, message="Could not read /etc/fstab")
 
-    if res.failed:
-        return SubTaskResult(success=False, message="Failed to update /etc/fstab")
+    # 2. Modify content in Python (Safe Regex)
+    lines = current_content.splitlines()
+    new_lines = []
+    changed = False
 
-    return SubTaskResult(success=True, message="/etc/fstab updated")
+    # Regex: Linee che NON iniziano con # e contengono 'swap'
+    swap_regex = re.compile(r"^[^#].*swap")
+
+    for line in lines:
+        if swap_regex.search(line):
+            new_lines.append(f"# {line} # Disabled by Calcifer")
+            changed = True
+        else:
+            new_lines.append(line)
+
+    if not changed:
+        return SubTaskResult(success=True, message="/etc/fstab already configured (no active swap lines)")
+
+    new_content = "\n".join(new_lines) + "\n"
+
+    # 3. Write Back (includes Backup automatically via write_file)
+    res_write = write_file(task, fstab_path, new_content)
+
+    if res_write.failed:
+        return SubTaskResult(success=False, message=f"Failed to update fstab: {res_write.result}")
+
+    return SubTaskResult(success=True, message="/etc/fstab updated (swap commented)")
 
 
 # --- MAIN TASK ---
@@ -147,7 +168,7 @@ def prepare_k8s_node(task: Task) -> Result:
     return Result(
         host=task.host,
         result=StandardResult(
-            status=TaskStatus.CHANGED,  # This is almost always a "state enforcement"
+            status=TaskStatus.CHANGED,
             message="OS Prepared: Modules loaded, Sysctl applied, Swap disabled."
         )
     )
