@@ -2,7 +2,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import run_command
+from tasks import run_command, fail
 from tasks.files import ensure_line_in_file
 
 
@@ -10,23 +10,18 @@ from tasks.files import ensure_line_in_file
 
 @automated_substep("Verify/Set System Hostname")
 def _ensure_hostname(task: Task, target_name: str) -> SubTaskResult:
-    """
-    Checks the current hostname and updates it using hostnamectl if different.
-    (This uses systemd API, so shell command is fine/standard here)
-    """
-    # 1. Check current hostname
+    # 1. Check
     res = run_command(task, "hostname")
     if res.failed:
         return SubTaskResult(success=False, message="Failed to retrieve hostname")
 
     current_name = res.result.strip()
-
     if current_name == target_name:
         return SubTaskResult(success=True, message=f"Hostname already set to '{target_name}'")
 
-    # 2. Set new hostname
-    set_cmd = f"sudo hostnamectl set-hostname {target_name}"
-    res_set = run_command(task, set_cmd)
+    # 2. Set (Using sudo wrapper)
+    set_cmd = f"hostnamectl set-hostname {target_name}"
+    res_set = run_command(task, set_cmd, sudo=True)
 
     if res_set.failed:
         return SubTaskResult(success=False, message=f"Failed to set hostname: {res_set.result}")
@@ -37,13 +32,11 @@ def _ensure_hostname(task: Task, target_name: str) -> SubTaskResult:
 @automated_substep("Configure /etc/hosts (127.0.0.1)")
 def _ensure_localhost_entry(task: Task) -> SubTaskResult:
     """
-    Ensures '127.0.1.1 localhost' exists using Python logic.
+    Ensures '127.0.0.1 localhost' exists using secure file utility.
     """
     target_line = "127.0.0.1 localhost"
-    # Regex to check if a definition already exists, even partial
     regex = r"^127\.0\.0\.1\s+localhost"
 
-    # ensure_line_in_file handles reading, matching and atomic writing
     res = ensure_line_in_file(task, "/etc/hosts", target_line, match_regex=regex)
 
     if res.failed:
@@ -56,11 +49,9 @@ def _ensure_localhost_entry(task: Task) -> SubTaskResult:
 @automated_substep("Configure /etc/hosts (127.0.1.1)")
 def _ensure_resolution_entry(task: Task, target_name: str) -> SubTaskResult:
     """
-    Ensures '127.0.1.1 <hostname>' exists, replacing old entries.
-    Safe replacement without using 'sed'.
+    Ensures '127.0.1.1 <hostname>' exists, replacing old entries safely.
     """
     target_line = f"127.0.1.1 {target_name}"
-    # Regex: Look for any line starting with 127.0.1.1 followed by spaces
     regex = r"^127\.0\.1\.1\s+"
 
     res = ensure_line_in_file(task, "/etc/hosts", target_line, match_regex=regex)
@@ -76,32 +67,19 @@ def _ensure_resolution_entry(task: Task, target_name: str) -> SubTaskResult:
 
 @automated_step("Configure System Hostname")
 def set_hostname_and_hosts(task: Task) -> Result:
-    """
-    Sets the system hostname to match the inventory name and updates /etc/hosts.
-    """
     target_hostname = task.host.name
 
-    # 1. Set System Hostname
-    step_host = _ensure_hostname(task, target_hostname)
-    if not step_host.success:
-        return Result(host=task.host, failed=True, result=StandardResult(TaskStatus.FAILED, step_host.message))
+    s1 = _ensure_hostname(task, target_hostname)
+    if not s1.success: return fail(task, s1)
 
-    # 2. Fix Localhost
-    step_lo = _ensure_localhost_entry(task)
-    if not step_lo.success:
-        return Result(host=task.host, failed=True, result=StandardResult(TaskStatus.FAILED, step_lo.message))
+    s2 = _ensure_localhost_entry(task)
+    if not s2.success: return fail(task, s2)
 
-    # 3. Fix Resolution IP
-    step_res = _ensure_resolution_entry(task, target_hostname)
-    if not step_res.success:
-        return Result(host=task.host, failed=True, result=StandardResult(TaskStatus.FAILED, step_res.message))
+    s3 = _ensure_resolution_entry(task, target_hostname)
+    if not s3.success: return fail(task, s3)
 
-    # Determine if anything changed for the final report
-    is_changed = (
-            "changed" in step_host.message or
-            "updated" in step_lo.message.lower() or
-            "set to" in step_res.message.lower()
-    )
+    is_changed = ("changed" in s1.message or s2.message.endswith("updated") or s3.message.startswith(
+        "Resolution entry set"))
 
     return Result(
         host=task.host,
