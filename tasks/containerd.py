@@ -3,7 +3,7 @@ from nornir.core.task import Task, Result
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
 from tasks.files import _write_file, ensure_line_in_file
-from tasks.utils import fail, run_cmd
+from tasks.utils import fail, run_command
 
 
 # --- SUB-STEPS ---
@@ -16,7 +16,7 @@ def _install_deps(task: Task) -> SubTaskResult:
     pkgs = "ca-certificates curl gnupg apt-transport-https software-properties-common"
     cmd = f"sudo apt-get update && sudo apt-get install -y {pkgs}"
 
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
     if res.failed:
         return SubTaskResult(success=False, message="Failed to install dependencies")
     return SubTaskResult(success=True, message="Dependencies installed")
@@ -30,11 +30,11 @@ def _setup_gpg(task: Task, distro_id: str) -> SubTaskResult:
     keyring_path = "/etc/apt/keyrings/docker.gpg"
 
     # 1. Idempotency Check
-    if not run_cmd(task, f"test -f {keyring_path}").failed:
+    if not run_command(task, f"test -f {keyring_path}").failed:
         return SubTaskResult(success=True, message="GPG Key already present")
 
     # 2. Prepare Directory
-    run_cmd(task, "sudo mkdir -p /etc/apt/keyrings")
+    run_command(task, "mkdir -p /etc/apt/keyrings", True)
 
     # 3. Download & Dearmor
     # Note: Docker usually serves the key at the same path for linux distros, 
@@ -43,12 +43,12 @@ def _setup_gpg(task: Task, distro_id: str) -> SubTaskResult:
 
     cmd = f"curl -fsSL {url} | sudo gpg --dearmor -o {keyring_path}"
 
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
     if res.failed:
         return SubTaskResult(success=False, message=f"Failed to download GPG key from {url}")
 
     # 4. Set Permissions
-    run_cmd(task, f"sudo chmod a+r {keyring_path}")
+    run_command(task, f"chmod a+r {keyring_path}", True)
 
     return SubTaskResult(success=True, message="GPG Key setup complete")
 
@@ -91,7 +91,7 @@ def _install_containerd(task: Task) -> SubTaskResult:
     """
     # Force update to ensure the new repo is picked up
     cmd = "sudo apt-get update && sudo apt-get install -y containerd.io"
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
 
     if res.failed:
         return SubTaskResult(success=False, message="Apt install failed")
@@ -107,13 +107,13 @@ def _configure_containerd(task: Task) -> SubTaskResult:
     config_path = "/etc/containerd/config.toml"
 
     # 1. Generate Default Config if missing
-    run_cmd(task, "sudo mkdir -p /etc/containerd")
+    run_command(task, "mkdir -p /etc/containerd", True)
 
-    exists = not run_cmd(task, f"test -f {config_path}").failed
+    exists = not run_command(task, f"test -f {config_path}").failed
 
     if not exists:
         gen_cmd = f"containerd config default | sudo tee {config_path}"
-        if run_cmd(task, gen_cmd).failed:
+        if run_command(task, gen_cmd).failed:
             return SubTaskResult(success=False, message="Failed to generate default config")
 
     # 2. Patch: SystemdCgroup = true
@@ -126,7 +126,7 @@ def _configure_containerd(task: Task) -> SubTaskResult:
     # 3. Cleanup: Ensure CRI plugin is not disabled (sanity check)
     # Using sed for deletion is simpler here as ensure_line_in_file adds/replaces
     sed_cri = f"sudo sed -i '/disabled_plugins.*cri/d' {config_path}"
-    run_cmd(task, sed_cri)
+    run_command(task, sed_cri)
 
     if res_patch.failed:
         return SubTaskResult(success=False, message="Failed to patch config.toml")
@@ -141,7 +141,7 @@ def _restart_service(task: Task) -> SubTaskResult:
     Restarts and enables the containerd service.
     """
     cmd = "sudo systemctl restart containerd && sudo systemctl enable containerd"
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to restart service")

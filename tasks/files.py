@@ -1,19 +1,13 @@
 import hashlib
 
 from nornir.core.task import Task, Result
-from nornir_scrapli.tasks import send_command
 
-from tasks.utils import run_local
+from tasks.utils import run_command
 
 
 def _read_file(task: Task, path: str) -> str:
     """Reads a remote or local file and returns the content."""
-    cmd = f"sudo cat {path}"
-
-    if task.host.platform == "linux_local":
-        res = task.run(task=run_local, command=cmd)
-    else:
-        res = task.run(task=send_command, command=cmd)
+    res = run_command(task, f"cat {path}", True)
 
     if res.failed:
         # If the file doesn't exist, return an empty string (or handle differently)
@@ -48,10 +42,7 @@ def _write_file(task: Task, path: str, content: str) -> Result:
     # Command: decode base64 and write to file via tee
     cmd = f"echo '{b64_content}' | base64 -d | sudo tee {path} > /dev/null"
 
-    if task.host.platform == "linux_local":
-        res = task.run(task=run_local, command=cmd)
-    else:
-        res = task.run(task=send_command, command=cmd)
+    res = run_command(task, cmd)
 
     return Result(host=task.host, changed=True, result="File updated", failed=res.failed)
 

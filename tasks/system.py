@@ -3,7 +3,7 @@ from nornir.core.task import Task, Result
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
 from tasks.files import ensure_line_in_file
-from tasks.utils import run_cmd
+from tasks.utils import run_command
 
 
 # --- SUB-STEPS ---
@@ -15,7 +15,7 @@ def _ensure_hostname(task: Task, target_name: str) -> SubTaskResult:
     (This uses systemd API, so shell command is fine/standard here)
     """
     # 1. Check current hostname
-    res = run_cmd(task, "hostname")
+    res = run_command(task, "hostname")
     if res.failed:
         return SubTaskResult(success=False, message="Failed to retrieve hostname")
 
@@ -26,7 +26,7 @@ def _ensure_hostname(task: Task, target_name: str) -> SubTaskResult:
 
     # 2. Set new hostname
     set_cmd = f"sudo hostnamectl set-hostname {target_name}"
-    res_set = run_cmd(task, set_cmd)
+    res_set = run_command(task, set_cmd)
 
     if res_set.failed:
         return SubTaskResult(success=False, message=f"Failed to set hostname: {res_set.result}")

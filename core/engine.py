@@ -79,7 +79,8 @@ class MatrixEngine:
                         f"\n[bold red]⛔ Execution halted due to critical failure in group {group_name}.[/bold red]")
                     sys.exit(1)
 
-    def _handle_results(self, agg_result: AggregatedResult) -> bool:
+    @staticmethod
+    def _handle_results(agg_result: AggregatedResult) -> bool:
         """
         Analyzes results, prints status (OK/WARN/FAIL) and decides whether to stop the engine.
         Returns True if execution should stop (Critical Failure).

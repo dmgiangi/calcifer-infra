@@ -7,11 +7,13 @@ azure:
 k8s:
   version: "1.29"
   pod_network_cidr: "10.244.0.0/16"
-  
+
+  # Lista complessa (non gestibile via ENV)
   kernel_modules:
     - overlay
     - br_netfilter
-  
+
+  # Dizionario complesso
   sysctl_params:
     net.bridge.bridge-nf-call-ip6tables: "1"
     net.bridge.bridge-nf-call-iptables: "1"
@@ -21,6 +23,6 @@ k8s:
 
   flux:
     enabled: true
-    github_url: "ssh://git@github.com/my-org/my-infra-repo.git"
+    github_url: "ssh://git@github.com/dmgiangi/calcifer-gitops.git"
     branch: "main"
-    cluster_path: "clusters/production/westeurope"
+    cluster_path: "clusters/production"

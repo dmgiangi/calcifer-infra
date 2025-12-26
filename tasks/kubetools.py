@@ -3,7 +3,7 @@ from nornir.core.task import Task, Result
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
 from tasks.files import _write_file
-from tasks.utils import fail, run_cmd
+from tasks.utils import fail, run_command
 
 
 def _get_k8s_version(task: Task) -> str:
@@ -27,7 +27,7 @@ def _install_deps(task: Task) -> SubTaskResult:
     pkgs = "apt-transport-https ca-certificates curl gnupg"
     cmd = f"sudo apt-get update && sudo apt-get install -y {pkgs}"
 
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
     if res.failed:
         return SubTaskResult(success=False, message="Failed to install dependencies")
     return SubTaskResult(success=True, message="Dependencies installed")
@@ -42,11 +42,11 @@ def _setup_k8s_key(task: Task, k8s_version: str) -> SubTaskResult:
     keyring_path = "/etc/apt/keyrings/kubernetes-apt-keyring.gpg"
 
     # Idempotency: check if key exists
-    if not run_cmd(task, f"test -f {keyring_path}").failed:
+    if not run_command(task, f"test -f {keyring_path}").failed:
         return SubTaskResult(success=True, message="K8s Keyring already present")
 
     # Ensure dir exists
-    run_cmd(task, "sudo mkdir -p /etc/apt/keyrings")
+    run_command(task, "mkdir -p /etc/apt/keyrings", True)
 
     # Download URL
     # Format: https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key
@@ -55,7 +55,7 @@ def _setup_k8s_key(task: Task, k8s_version: str) -> SubTaskResult:
     # Pipeline: curl -> gpg dearmor -> tee
     cmd = f"curl -fsSL {url} | sudo gpg --dearmor -o {keyring_path}"
 
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
     if res.failed:
         return SubTaskResult(success=False, message=f"Failed to download key for {k8s_version}")
 
@@ -99,7 +99,7 @@ def _install_packages(task: Task) -> SubTaskResult:
     """
     # We update to see the new repo packages
     cmd = "sudo apt-get update && sudo apt-get install -y kubelet kubeadm kubectl"
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
 
     if res.failed:
         return SubTaskResult(success=False, message="Apt install failed")
@@ -113,7 +113,7 @@ def _hold_packages(task: Task) -> SubTaskResult:
     Prevents automatic upgrades using apt-mark hold.
     """
     cmd = "sudo apt-mark hold kubelet kubeadm kubectl"
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to hold packages")
@@ -128,7 +128,7 @@ def _enable_service(task: Task) -> SubTaskResult:
     (it crashes until configured by kubeadm).
     """
     cmd = "sudo systemctl enable kubelet"
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to enable service")

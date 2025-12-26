@@ -4,7 +4,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks.utils import fail, run_cmd
+from tasks.utils import fail, run_command
 
 
 # --- SUB-STEPS ---
@@ -15,7 +15,7 @@ def _check_initialization(task: Task) -> SubTaskResult:
     Checks if /etc/kubernetes/admin.conf exists to determine if init is needed.
     """
     cmd = "test -f /etc/kubernetes/admin.conf"
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
 
     if not res.failed:
         return SubTaskResult(success=True, message="Cluster already initialized", data=True)
@@ -52,7 +52,7 @@ networking:
     # Using printf is safer for multiline variables
     cmd = f"printf '{config_content}' > /tmp/kubeadm-config.yaml"
 
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
     if res.failed:
         return SubTaskResult(success=False, message="Failed to write kubeadm-config.yaml")
 
@@ -70,7 +70,7 @@ def _run_kubeadm_init(task: Task) -> SubTaskResult:
     # Increase timeout for this specific command as init can take time (pulling images)
     # Note: Scrapli might need timeout adjustment in connection options, 
     # but usually default is enough if images are cached.
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
 
     if res.failed:
         # Extract last lines of error for context
@@ -85,11 +85,11 @@ def _setup_user_kubeconfig(task: Task) -> SubTaskResult:
     Copies admin.conf to ~/.kube/config and sets permissions for the current user.
     """
     # 1. Create directory
-    run_cmd(task, "mkdir -p $HOME/.kube")
+    run_command(task, "mkdir -p $HOME/.kube")
 
     # 2. Copy file (requires sudo to read source)
     cp_cmd = "sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config"
-    res_cp = run_cmd(task, cp_cmd)
+    res_cp = run_command(task, cp_cmd)
 
     if res_cp.failed:
         return SubTaskResult(success=False, message="Failed to copy kubeconfig")
@@ -97,7 +97,7 @@ def _setup_user_kubeconfig(task: Task) -> SubTaskResult:
     # 3. Fix permissions
     # We use $(id -u):$(id -g) to get current user/group ID dynamically
     chown_cmd = "sudo chown $(id -u):$(id -g) $HOME/.kube/config"
-    res_chown = run_cmd(task, chown_cmd)
+    res_chown = run_command(task, chown_cmd)
 
     if res_chown.failed:
         return SubTaskResult(success=False, message="Failed to set permissions")
@@ -111,7 +111,7 @@ def _install_cni(task: Task, manifest_url: str) -> SubTaskResult:
     Applies the CNI manifest (Flannel).
     """
     cmd = f"kubectl apply -f {manifest_url}"
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to apply CNI manifest")
@@ -128,7 +128,7 @@ def _untaint_node(task: Task) -> SubTaskResult:
     node_name = task.host.name
     cmd = f"kubectl taint nodes {node_name} node-role.kubernetes.io/control-plane:NoSchedule-"
 
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
 
     if res.failed:
         if "not found" in res.result:
@@ -145,7 +145,7 @@ def _fetch_kubeconfig_local(task: Task) -> SubTaskResult:
     """
     # 1. Read remote content
     cat_cmd = "sudo cat /etc/kubernetes/admin.conf"
-    res_cat = run_cmd(task, cat_cmd)
+    res_cat = run_command(task, cat_cmd)
 
     if res_cat.failed:
         return SubTaskResult(success=False, message="Failed to read remote admin.conf")

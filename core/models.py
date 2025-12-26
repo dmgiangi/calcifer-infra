@@ -8,6 +8,7 @@ class TaskStatus(str, Enum):
     CHANGED = "CHANGED"  # Task performed an action successfully
     WARNING = "WARNING"  # Task succeeded but with non-critical issues
     FAILED = "FAILED"  # Task failed, blocking execution
+    SKIPPED = "SKIPPED"  # Task was skipped due to the environment
 
 
 @dataclass
@@ -25,4 +26,5 @@ class SubTaskResult:
     """Lightweight result object for internal sub-steps."""
     success: bool
     message: str
+    exception: Optional[Exception] = None
     data: Optional[Any] = None # To pass data to the context (e.g., current_sub_id)

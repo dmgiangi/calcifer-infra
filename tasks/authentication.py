@@ -4,7 +4,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks.utils import run_local, fail
+from tasks.utils import run_command, fail
 
 
 @automated_substep("Check Execution Environment")
@@ -16,7 +16,7 @@ def _check_environment(task: Task) -> SubTaskResult:
 
 @automated_substep("Check Azure CLI Binary")
 def _check_cli_installed(task: Task) -> SubTaskResult:
-    res = task.run(task=run_local, command="which az")
+    res = run_command(task, "which az")
     if res.failed:
         return SubTaskResult(success=False, message="Binary 'az' not found")
     return SubTaskResult(success=True, message="CLI Found")
@@ -25,15 +25,15 @@ def _check_cli_installed(task: Task) -> SubTaskResult:
 @automated_substep("Check Login Session")
 def _check_active_session(task: Task) -> SubTaskResult:
     # Here we return session data in 'data' to use it later
-    res = task.run(task=run_local, command="az account show -o json")
+    res = run_command(task, "az account show -o json")
     if res.failed:
         return SubTaskResult(success=False, message="No active session (az login required)")
 
     try:
         data = json.loads(res.result)
         return SubTaskResult(success=True, message="Session Active", data=data)
-    except:
-        return SubTaskResult(success=False, message="JSON parse error on auth data")
+    except Exception as e:
+        return SubTaskResult(success=False, exception=e, message="JSON parse error on auth data")
 
 
 @automated_substep("Verify Subscription Context")
@@ -50,7 +50,7 @@ def _verify_subscription(task: Task, current_sub_id: str) -> SubTaskResult:
         return SubTaskResult(success=True, message=f"Context Correct ({target_sub})")
 
     # Attempt to switch
-    res = task.run(task=run_local, command=f"az account set --subscription {target_sub}")
+    res = run_command(task, f"az account set --subscription {target_sub}")
     if res.failed:
         return SubTaskResult(success=False, message=f"Failed to switch to {target_sub}")
 
@@ -61,7 +61,7 @@ def _verify_subscription(task: Task, current_sub_id: str) -> SubTaskResult:
 def _check_extensions(task: Task) -> SubTaskResult:
     required = ["connectedk8s"]
 
-    res = task.run(task=run_local, command="az extension list -o json")
+    res = run_command(task, "az extension list -o json")
     if res.failed:
         return SubTaskResult(success=False, message="Failed to list extensions")
 
@@ -83,7 +83,7 @@ def _check_providers(task: Task) -> SubTaskResult:
     ]
 
     cmd = "az provider list --query \"[?registrationState=='Registered'].namespace\" -o json"
-    res = task.run(task=run_local, command=cmd)
+    res = run_command(task, cmd)
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to list providers")

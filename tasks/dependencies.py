@@ -3,7 +3,7 @@ from nornir.core.task import Task, Result
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
 from tasks.files import _write_file
-from tasks.utils import run_cmd, fail
+from tasks.utils import run_command, fail
 
 
 # --- SUB-STEPS ---
@@ -18,7 +18,7 @@ def _install_prerequisites(task: Task) -> SubTaskResult:
     pkgs = "ca-certificates curl apt-transport-https lsb-release gnupg"
     cmd = f"sudo apt-get update && sudo apt-get install -y {pkgs}"
 
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
     if res.failed:
         return SubTaskResult(success=False, message=f"Failed to install prerequisites: {res.result}")
 
@@ -34,23 +34,23 @@ def _setup_microsoft_gpg(task: Task) -> SubTaskResult:
 
     # 1. Idempotency Check: Don't download if exists
     # We use 'test -f' via shell
-    if not run_cmd(task, f"test -f {keyring_path}").failed:
+    if not run_command(task, f"test -f {keyring_path}").failed:
         return SubTaskResult(success=True, message="GPG Key already present")
 
     # 2. Ensure directory exists
-    run_cmd(task, "sudo mkdir -p /etc/apt/keyrings")
+    run_command(task, "mkdir -p /etc/apt/keyrings", True)
 
     # 3. Download & Dearmor
     # Pipeline: curl -> gpg -> tee
     url = "https://packages.microsoft.com/keys/microsoft.asc"
     cmd = f"curl -sLS {url} | gpg --dearmor | sudo tee {keyring_path} > /dev/null"
 
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
     if res.failed:
         return SubTaskResult(success=False, message="Failed to download/dearmor GPG key")
 
     # 4. Secure permissions (readable by apt)
-    run_cmd(task, f"sudo chmod go+r {keyring_path}")
+    run_command(task, f"chmod go+r {keyring_path}", True)
 
     return SubTaskResult(success=True, message="GPG Key setup complete")
 
@@ -92,13 +92,13 @@ def _install_package(task: Task) -> SubTaskResult:
     """
     # Check if installed first to save time? 
     # Apt is generally smart, but 'which az' is faster.
-    if not run_cmd(task, "which az").failed:
+    if not run_command(task, "which az").failed:
         return SubTaskResult(success=True, message="Azure CLI already installed (binary found)")
 
     # Update is mandatory after adding a new repo
     cmd = "sudo apt-get update && sudo apt-get install -y azure-cli"
 
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
     if res.failed:
         return SubTaskResult(success=False, message="Apt install failed")
 

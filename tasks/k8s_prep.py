@@ -4,7 +4,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks.utils import run_cmd, fail
+from tasks.utils import run_command, fail
 
 
 # --- SUB-STEPS ---
@@ -23,7 +23,7 @@ def _load_kernel_modules(task: Task, modules: List[str]) -> SubTaskResult:
     # Write to /etc/modules-load.d/k8s.conf
     # usage of tee ensures sudo permissions apply to the write operation
     echo_cmd = f"echo '{file_content}' | sudo tee /etc/modules-load.d/k8s.conf"
-    res_persist = run_cmd(task, echo_cmd)
+    res_persist = run_command(task, echo_cmd)
 
     if res_persist.failed:
         return SubTaskResult(success=False, message="Failed to write modules config file")
@@ -32,11 +32,11 @@ def _load_kernel_modules(task: Task, modules: List[str]) -> SubTaskResult:
     for mod in modules:
         # Check if loaded first (optimization)
         check_cmd = f"lsmod | grep {mod}"
-        res_check = run_cmd(task, check_cmd)
+        res_check = run_command(task, check_cmd)
 
         if res_check.failed:
             # Not loaded, load it now
-            res_load = run_cmd(task, f"sudo modprobe {mod}")
+            res_load = run_command(task, f"modprobe {mod}", True)
             if res_load.failed:
                 failed_mods.append(mod)
 
@@ -57,14 +57,14 @@ def _configure_sysctl(task: Task, params: Dict[str, str]) -> SubTaskResult:
 
     # 2. Write to /etc/sysctl.d/k8s.conf
     write_cmd = f"echo '{content}' | sudo tee /etc/sysctl.d/k8s.conf"
-    res_write = run_cmd(task, write_cmd)
+    res_write = run_command(task, write_cmd)
 
     if res_write.failed:
         return SubTaskResult(success=False, message="Failed to write sysctl config")
 
     # 3. Apply changes (Reload)
     # --system loads settings from all system configuration files
-    res_reload = run_cmd(task, "sudo sysctl --system")
+    res_reload = run_command(task, "sysctl --system", True)
 
     if res_reload.failed:
         return SubTaskResult(success=False, message="Failed to reload sysctl")
@@ -79,14 +79,14 @@ def _disable_swap_runtime(task: Task) -> SubTaskResult:
     """
     # Check if swap is active
     check_cmd = "swapon --show"
-    res_check = run_cmd(task, check_cmd)
+    res_check = run_command(task, check_cmd)
 
     # If result is empty, swap is already off
     if not res_check.result.strip():
         return SubTaskResult(success=True, message="Swap already disabled")
 
     # Disable it
-    res_off = run_cmd(task, "sudo swapoff -a")
+    res_off = run_command(task, "swapoff -a", True)
     if res_off.failed:
         return SubTaskResult(success=False, message="Failed to run swapoff")
 
@@ -104,7 +104,7 @@ def _disable_swap_fstab(task: Task) -> SubTaskResult:
     # s/^/# /        -> Substitute start of line with '# '
     sed_cmd = "sudo sed -i '/^[^#].*swap/ s/^/# /' /etc/fstab"
 
-    res = run_cmd(task, sed_cmd)
+    res = run_command(task, sed_cmd)
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to update /etc/fstab")
@@ -151,5 +151,3 @@ def prepare_k8s_node(task: Task) -> Result:
             message="OS Prepared: Modules loaded, Sysctl applied, Swap disabled."
         )
     )
-
-

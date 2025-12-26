@@ -4,7 +4,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks.utils import fail, run_cmd
+from tasks.utils import fail, run_command
 
 
 # --- SUB-STEPS ---
@@ -16,13 +16,13 @@ def _install_flux_cli(task: Task) -> SubTaskResult:
     """
     # Idempotency check
     check_cmd = "which flux"
-    if not run_cmd(task, check_cmd).failed:
+    if not run_command(task, check_cmd).failed:
         return SubTaskResult(success=True, message="Flux CLI already installed")
 
     # Install
     # -s: silent, -S: show errors
     cmd = "curl -sS https://fluxcd.io/install.sh | sudo bash"
-    res = run_cmd(task, cmd)
+    res = run_command(task, cmd)
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to install Flux CLI")
@@ -48,7 +48,7 @@ def _configure_ssh_key(task: Task, local_path: str, remote_path: str) -> SubTask
 
     # 2. Ensure Remote Directory Exists
     remote_dir = str(Path(remote_path).parent)
-    run_cmd(task, f"mkdir -p {remote_dir}")
+    run_command(task, f"mkdir -p {remote_dir}")
 
     # 3. Write Remote File
     # We use a heredoc pattern to write the content safely via cat
@@ -60,12 +60,12 @@ def _configure_ssh_key(task: Task, local_path: str, remote_path: str) -> SubTask
 
     write_cmd = f"cat << 'EOF' > {remote_path}\n{safe_content}\nEOF"
 
-    res_write = run_cmd(task, write_cmd)
+    res_write = run_command(task, write_cmd)
     if res_write.failed:
         return SubTaskResult(success=False, message="Failed to write remote key file")
 
     # 4. Set Permissions (0600)
-    res_chmod = run_cmd(task, f"chmod 0600 {remote_path}")
+    res_chmod = run_command(task, f"chmod 0600 {remote_path}")
     if res_chmod.failed:
         return SubTaskResult(success=False, message="Failed to set key permissions")
 
@@ -81,7 +81,7 @@ def _bootstrap_flux(task: Task, config: dict) -> SubTaskResult:
     marker_file = "/var/lib/flux_bootstrapped"
 
     # 1. Idempotency Check
-    if not run_cmd(task, f"test -f {marker_file}").failed:
+    if not run_command(task, f"test -f {marker_file}").failed:
         return SubTaskResult(success=True, message="Bootstrap already completed (marker exists)")
 
     # 2. Prepare Command
@@ -107,7 +107,7 @@ def _bootstrap_flux(task: Task, config: dict) -> SubTaskResult:
 
     # 3. Execute (This takes time)
     # We might need to adjust timeout if connection is slow
-    res = run_cmd(task, bootstrap_cmd)
+    res = run_command(task, bootstrap_cmd)
 
     if res.failed:
         # Return last lines of error
@@ -115,7 +115,7 @@ def _bootstrap_flux(task: Task, config: dict) -> SubTaskResult:
         return SubTaskResult(success=False, message=f"Bootstrap failed: {err_snippet}")
 
     # 4. Create Marker File
-    run_cmd(task, f"sudo touch {marker_file}")
+    run_command(task, f"touch {marker_file}", True)
 
     return SubTaskResult(success=True, message="Flux Bootstrapped successfully")
 

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import typer
 from rich import print as rprint
 from rich.panel import Panel
@@ -15,22 +17,43 @@ app = typer.Typer(
 @app.callback()
 def main(
         ctx: typer.Context,
-        verbose: bool = typer.Option(
-            False, "--verbose", "-v",
-            help="Enable detailed logging of sub-steps to console."
+        # --- CHANGED: Replaced verbose with quiet ---
+        quiet: bool = typer.Option(
+            False, "--quiet", "-q",
+            help="Disable detailed sub-step logging (Silent Mode)."
+        ),
+        sudo_pass: bool = typer.Option(
+            False, "--ask-become-pass", "-K",
+            help="Prompt for sudo password (become) for privileged tasks."
+        ),
+        config_file: Path = typer.Option(
+            "calcifer_config.yaml", "--config", "-c",
+            help="Path to the configuration YAML file.",
+            exists=True, dir_okay=False, readable=True
         )
 ):
     """
     Calcifer Infrastructure CLI.
     Common entry point for all commands.
     """
-    # 1. Set global state based on flag
-    global_config.VERBOSE = verbose
+    # 1. Update Global State
+    # Logic Inversion: If quiet is False, Verbose is True
+    global_config.VERBOSE = not quiet
+    global_config.CONFIG_FILE = str(config_file)
 
-    # 2. Show banner (only if not asking for help or completion)
+    # 2. Handle Sudo Password
+    if sudo_pass:
+        password = typer.prompt("Sudo Password", hide_input=True)
+        global_config.SUDO_PASSWORD = password
+
+    # 3. Show Banner (unless help/completion)
     if ctx.invoked_subcommand:
         subtitle = "v2.0 - Matrix Engine"
-        if verbose:
+
+        # Update subtitle logic to reflect the mode
+        if quiet:
+            subtitle += " (Quiet Mode)"
+        else:
             subtitle += " (Verbose Mode)"
 
         rprint(Panel.fit(
