@@ -2,7 +2,7 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks.utils import fail, run_command
+from tasks import fail, run_command
 
 
 @automated_substep("Read OS Release")

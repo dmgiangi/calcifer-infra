@@ -2,7 +2,7 @@ import hashlib
 
 from nornir.core.task import Task, Result
 
-from tasks.utils import run_command
+from tasks import run_command
 
 
 def _read_file(task: Task, path: str) -> str:

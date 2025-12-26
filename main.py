@@ -1,6 +1,9 @@
+import os
+import subprocess
 from pathlib import Path
 
 import typer
+from nornir import InitNornir
 from rich import print as rprint
 from rich.panel import Panel
 
@@ -17,7 +20,6 @@ app = typer.Typer(
 @app.callback()
 def main(
         ctx: typer.Context,
-        # --- CHANGED: Replaced verbose with quiet ---
         quiet: bool = typer.Option(
             False, "--quiet", "-q",
             help="Disable detailed sub-step logging (Silent Mode)."
@@ -37,7 +39,6 @@ def main(
     Common entry point for all commands.
     """
     # 1. Update Global State
-    # Logic Inversion: If quiet is False, Verbose is True
     global_config.VERBOSE = not quiet
     global_config.CONFIG_FILE = str(config_file)
 
@@ -50,7 +51,6 @@ def main(
     if ctx.invoked_subcommand:
         subtitle = "v2.0 - Matrix Engine"
 
-        # Update subtitle logic to reflect the mode
         if quiet:
             subtitle += " (Quiet Mode)"
         else:
@@ -61,6 +61,63 @@ def main(
             border_style="blue",
             subtitle=subtitle
         ))
+
+
+@app.command()
+def trust():
+    """
+    [Security] Scans remote hosts and updates local known_hosts.
+    Required because auth_strict_key is now enabled.
+    """
+    rprint(Panel.fit("[bold blue]🛡️  SSH Trust Manager[/bold blue]", border_style="blue"))
+
+    # 1. Load Inventory (Lightweight init)
+    try:
+        # Usa il file di config Nornir standard (che punta a hosts.yaml/groups.yaml)
+        nr = InitNornir(config_file="inventory_config.yaml")
+    except Exception as e:
+        rprint(f"[bold red]❌ Config Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    known_hosts_path = os.path.expanduser("~/.ssh/known_hosts")
+
+    # 2. Iterate over hosts
+    for name, host in nr.inventory.hosts.items():
+        # Saltiamo localhost o connessioni locali
+        if host.hostname in ["127.0.0.1", "localhost"] or host.platform == "linux_local":
+            continue
+
+        target = host.hostname
+        port = host.port or 22
+
+        rprint(f"🔸 Scanning [bold cyan]{name}[/bold cyan] ({target}:{port})...", end="")
+
+        # 3. Check if already known (ssh-keygen -F)
+        check_cmd = ["ssh-keygen", "-F", target]
+        is_known = subprocess.run(check_cmd, capture_output=True).returncode == 0
+
+        if is_known:
+            rprint(" [green]Already Trusted ✔[/green]")
+            continue
+
+        # 4. Scan (ssh-keyscan)
+        # -H: Hash names (optional, secure format)
+        scan_cmd = ["ssh-keyscan", "-p", str(port), "-H", target]
+        scan_res = subprocess.run(scan_cmd, capture_output=True, text=True)
+
+        if scan_res.returncode != 0 or not scan_res.stdout:
+            rprint(f" [red]Failed ❌[/red]\n   {scan_res.stderr}")
+            continue
+
+        # 5. Append to known_hosts
+        try:
+            with open(known_hosts_path, "a") as f:
+                f.write(scan_res.stdout)
+            rprint(" [yellow]Added to known_hosts ✨[/yellow]")
+        except Exception as e:
+            rprint(f" [red]Write Error ❌[/red]: {e}")
+
+    rprint("\n[bold green]✅ Trust procedure completed.[/bold green]")
 
 
 @app.command()
