@@ -47,11 +47,11 @@ def gather_system_facts(task: Task) -> Result:
 
     # 2. Get Arch
     s2 = _get_cpu_arch(task)
-    if not s2.success: return fail(task, s2)
+    if not s2.success: return fail(task, s2),
     arch = s2.data
 
     # 3. Compatibility Check (The "Gatekeeper")
-    supported_ids = ["ubuntu", "debian"]
+    supported_ids = ["pop", "ubuntu", "debian"]
     distro_id = os_data.get("ID", "unknown").lower()
 
     if distro_id not in supported_ids:

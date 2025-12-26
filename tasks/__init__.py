@@ -1,6 +1,8 @@
-import hashlib
+import datetime
+import os
 import shlex
 import subprocess
+import tempfile
 
 from nornir.core.task import Task, Result
 from nornir_scrapli.tasks import send_command
@@ -76,7 +78,6 @@ def run_local_subprocess(task: Task, command: str) -> Result:
         if proc.returncode != 0:
             output += f"\nError: {proc.stderr}"
 
-
         return Result(
             host=task.host,
             result=output,
@@ -110,32 +111,102 @@ def read_file(task: Task, path: str) -> str:
     return res.result
 
 
+import uuid
+import hashlib
+from nornir.core.task import Task, Result
+
+
+# Assicurati di importare run_command e read_file correttamente dal tuo progetto
+
+
 def write_file(task: Task, path: str, content: str) -> Result:
     """
-    Writes content to a remote file (using tee for sudo permissions).
-    Returns a Result indicating whether it was changed or not.
+    Writes content to a remote file using SCP (Stage 1) and Sudo Move (Stage 2).
+    Includes automatic VERSIONED BACKUP of the existing file before overwriting.
     """
-    # 1. Calculate hash of the new content
+    # 1. Calcolo Hash (Idempotenza)
     new_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
 
-    # 2. Read current content (for idempotency)
+    # Leggiamo il file remoto attuale (se esiste)
     current_content = read_file(task, path)
     current_hash = hashlib.md5(current_content.encode('utf-8')).hexdigest()
 
     if new_hash == current_hash:
         return Result(host=task.host, changed=False, result="File is up to date")
 
-    # 3. Write (using a secure technique with heredoc and quotes to avoid injection)
-    # Use base64 to avoid any bash escaping issues
-    import base64
-    b64_content = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+    # 2. Preparazione File Temporanei
+    with tempfile.NamedTemporaryFile(mode='w', delete=False) as f_local:
+        f_local.write(content)
+        local_temp_path = f_local.name
 
-    # Command: decode base64 and write to file via tee
-    cmd = f"echo '{b64_content}' | base64 -d | sudo -n tee {path} > /dev/null"
+    remote_temp_path = f"/tmp/calcifer_{uuid.uuid4().hex}"
 
-    res = run_command(task, cmd)
+    try:
+        # 3. Trasferimento SCP (Esecuzione Locale)
+        host = task.host.hostname
+        user = task.host.username
+        port = str(task.host.port or 22)
 
-    return Result(host=task.host, changed=True, result="File updated", failed=res.failed)
+        scp_cmd = [
+            "scp", "-P", port,
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            local_temp_path,
+            f"{user}@{host}:{remote_temp_path}"
+        ]
+
+        proc = subprocess.run(
+            scp_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True
+        )
+
+        if proc.returncode != 0:
+            return Result(host=task.host, failed=True, result=f"SCP Failed: {proc.stderr}")
+
+        # --- FASE DI BACKUP ---
+        # Verifichiamo se il file di destinazione esiste già
+        check_exists = run_command(task, f"test -f {path}")
+
+        if not check_exists.failed:
+            # a. Creiamo la directory di backup nella home dell'utente (o root se sudo cambia HOME)
+            backup_dir = "$HOME/.calcifer_backups"
+
+            # b. Generiamo il nome file versionato
+            # /etc/hosts -> _etc_hosts
+            safe_filename = path.replace("/", "_")
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = f"{backup_dir}/{safe_filename}.{timestamp}.bak"
+
+            # c. Eseguiamo il backup (mkdir + cp)
+            # Usiamo sudo=True perché il file originale potrebbe essere di root
+            backup_cmd = f"mkdir -p {backup_dir} && cp {path} {backup_path}"
+
+            res_bkp = run_command(task, backup_cmd, sudo=True)
+
+            if res_bkp.failed:
+                # Se il backup fallisce, INTERROMPIAMO per sicurezza
+                run_command(task, f"rm {remote_temp_path}")  # Pulizia tmp
+                return Result(host=task.host, failed=True, result=f"Backup failed: {res_bkp.result}")
+
+        # 4. Finalizzazione (SUDO MV)
+        mv_cmd = f"mv {remote_temp_path} {path}"
+        res_move = run_command(task, mv_cmd, sudo=True)
+
+        if res_move.failed:
+            run_command(task, f"rm {remote_temp_path}")
+            return Result(host=task.host, failed=True, result=f"Move failed: {res_move.result}")
+
+        # 5. Fix Owner (Opzionale, rimetti root se necessario)
+        run_command(task, f"chown root:root {path}", sudo=True)
+
+        return Result(host=task.host, changed=True, result=f"File updated (Backup saved)")
+    except Exception as e:
+        return Result(host=task.host, failed=True, result=f"Unexpected error: {str(e)}")
+    finally:
+        if os.path.exists(local_temp_path):
+            os.remove(local_temp_path)
 
 
 def ensure_line_in_file(task: Task, path: str, line: str, match_regex: str = None) -> Result:

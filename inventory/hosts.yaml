@@ -1,5 +1,6 @@
 cp-calcifer-01:
   hostname: calcifer
+  username: dmgiangi
   groups:
     - k8s_control_plane
 
