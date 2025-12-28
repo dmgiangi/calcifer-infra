@@ -5,7 +5,13 @@ from nornir.core.task import Task, Result
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
 from tasks import fail
-from utils.linux import run_command, command_exists
+from utils.azure import (
+    az_is_installed,
+    az_account_show,
+    az_account_set,
+    az_extension_list,
+    az_provider_list
+)
 
 
 @automated_substep("Check Execution Environment")
@@ -17,7 +23,7 @@ def _check_environment(task: Task) -> SubTaskResult:
 
 @automated_substep("Check Azure CLI Binary")
 def _check_cli_installed(task: Task) -> SubTaskResult:
-    if not command_exists(task, "az"):
+    if not az_is_installed(task):
         return SubTaskResult(success=False, message="Binary 'az' not found")
     return SubTaskResult(success=True, message="CLI Found")
 
@@ -25,7 +31,7 @@ def _check_cli_installed(task: Task) -> SubTaskResult:
 @automated_substep("Check Login Session")
 def _check_active_session(task: Task) -> SubTaskResult:
     # Here we return session data in 'data' to use it later
-    res = run_command(task, "az account show -o json")
+    res = az_account_show(task)
     if res.failed:
         return SubTaskResult(success=False, message="No active session (az login required)")
 
@@ -50,7 +56,7 @@ def _verify_subscription(task: Task, current_sub_id: str) -> SubTaskResult:
         return SubTaskResult(success=True, message=f"Context Correct ({target_sub})")
 
     # Attempt to switch
-    res = run_command(task, f"az account set --subscription {target_sub}")
+    res = az_account_set(task, target_sub)
     if res.failed:
         return SubTaskResult(success=False, message=f"Failed to switch to {target_sub}")
 
@@ -61,7 +67,7 @@ def _verify_subscription(task: Task, current_sub_id: str) -> SubTaskResult:
 def _check_extensions(task: Task) -> SubTaskResult:
     required = ["connectedk8s"]
 
-    res = run_command(task, "az extension list -o json")
+    res = az_extension_list(task)
     if res.failed:
         return SubTaskResult(success=False, message="Failed to list extensions")
 
@@ -82,8 +88,8 @@ def _check_providers(task: Task) -> SubTaskResult:
         "Microsoft.ExtendedLocation"
     ]
 
-    cmd = "az provider list --query \"[?registrationState=='Registered'].namespace\" -o json"
-    res = run_command(task, cmd)
+    # original query: "[?registrationState=='Registered'].namespace"
+    res = az_provider_list(task, query="[?registrationState=='Registered'].namespace")
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to list providers")

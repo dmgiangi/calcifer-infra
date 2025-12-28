@@ -6,7 +6,15 @@ from nornir.core.task import Task, Result
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
 from tasks import fail
-from utils.linux import run_command, write_file, read_file
+from utils.linux import (
+    write_file,
+    read_file,
+    is_module_loaded,
+    load_module,
+    reload_sysctl,
+    is_swap_active,
+    disable_swap
+)
 
 
 # --- SUB-STEPS ---
@@ -30,12 +38,9 @@ def _load_kernel_modules(task: Task, modules: List[str]) -> SubTaskResult:
     # 2. Runtime Load (modprobe)
     for mod in modules:
         # Check if loaded first (optimization)
-        check_cmd = f"lsmod | grep {mod}"
-        res_check = run_command(task, check_cmd)
-
-        if res_check.failed:
+        if not is_module_loaded(task, mod):
             # Not loaded, load it now
-            res_load = run_command(task, f"modprobe {mod}", sudo=True)
+            res_load = load_module(task, mod)
             if res_load.failed:
                 failed_mods.append(mod)
 
@@ -62,7 +67,7 @@ def _configure_sysctl(task: Task, params: Dict[str, str]) -> SubTaskResult:
 
     # 3. Apply changes (Reload)
     # --system loads settings from all system configuration files
-    res_reload = run_command(task, "sysctl --system", sudo=True)
+    res_reload = reload_sysctl(task)
 
     if res_reload.failed:
         return SubTaskResult(success=False, message="Failed to reload sysctl")
@@ -76,15 +81,11 @@ def _disable_swap_runtime(task: Task) -> SubTaskResult:
     Disables swap immediately using swapoff.
     """
     # Check if swap is active
-    check_cmd = "swapon --show"
-    res_check = run_command(task, check_cmd)
-
-    # If result is empty, swap is already off
-    if not res_check.result.strip():
+    if not is_swap_active(task):
         return SubTaskResult(success=True, message="Swap already disabled")
 
     # Disable it
-    res_off = run_command(task, "swapoff -a", sudo=True)
+    res_off = disable_swap(task)
     if res_off.failed:
         return SubTaskResult(success=False, message="Failed to run swapoff")
 

@@ -6,14 +6,12 @@ from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
 from tasks import fail
 from utils.linux import (
-    run_command,
     write_file,
     remote_file_exists,
-    curl_download,
-    command_exists,
-    change_mode,
     make_directory,
-    remove_file
+    remove_file,
+    flux_install_cli,
+    flux_bootstrap
 )
 
 
@@ -21,25 +19,9 @@ from utils.linux import (
 
 @automated_substep("Install Flux CLI")
 def _install_flux_cli(task: Task) -> SubTaskResult:
-    if command_exists(task, "flux"):
-        return SubTaskResult(success=True, message="Flux CLI already installed")
-
-    install_script_path = "/tmp/install_flux.sh"
-
-    res_download = curl_download(task, "https://fluxcd.io/install.sh", install_script_path)
-    if res_download.failed:
-        return SubTaskResult(success=False, message="Failed to download Flux CLI install script")
-
-    change_mode(task, install_script_path, "+x")
-
-    install_cmd = f"{install_script_path}"
-    res_install = run_command(task, install_cmd, sudo=True)
-
-    remove_file(task, install_script_path)
-
-    if res_install.failed:
-        return SubTaskResult(success=False, message="Failed to install Flux CLI")
-
+    res = flux_install_cli(task)
+    if res.failed:
+        return SubTaskResult(success=False, message=f"Failed to install Flux CLI: {res.result}")
     return SubTaskResult(success=True, message="Flux CLI installed")
 
 
@@ -62,7 +44,6 @@ def _configure_ssh_key(task: Task, local_path: str, remote_path: str) -> SubTask
     # 3. Write Remote File (Secure)
     user = task.host.username
     owner = f"{user}:{user}"
-    # Note: write_file signature in utils.linux is write_file(task, path, content, owner, permissions, sudo)
     res_write = write_file(task, remote_path, key_content, owner=owner, permissions="0600")
 
     if res_write.failed:
@@ -87,22 +68,17 @@ def _bootstrap_flux(task: Task, config: dict) -> SubTaskResult:
     path = flux_conf["cluster_path"]
     key_path = flux_conf["remote_key_path"]
 
-    bootstrap_cmd = (
-        f"export KUBECONFIG=/etc/kubernetes/admin.conf && "
-        f"flux bootstrap git "
-        f"--url={url} "
-        f"--branch={branch} "
-        f"--path={path} "
-        f"--private-key-file={key_path} "
-        f"--silent"
-    )
-
     # Execute Bootstrap
-    res = run_command(task, bootstrap_cmd)
+    res = flux_bootstrap(
+        task,
+        url,
+        branch,
+        path,
+        key_path
+    )
 
     # --- SECURITY CLEANUP ---
     # Delete the private key file from the host.
-    # It is now safely stored as a Kubernetes Secret.
     remove_file(task, key_path, sudo=True)
 
     if res.failed:

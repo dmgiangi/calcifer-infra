@@ -3,7 +3,7 @@ from nornir.core.task import Task, Result
 from core.decorators import automated_step
 from core.decorators import console
 from core.models import TaskStatus, StandardResult
-from utils.linux import run_command
+from utils.linux import check_connectivity
 
 
 @automated_step("Check Internet Connectivity")
@@ -13,10 +13,9 @@ def check_internet_access(task: Task) -> Result:
     Uses the unified run_command dispatcher.
     """
     target = "1.1.1.1"
-    cmd_string = f"ping -c 2 {target}"
 
     # run_command automatically handles local vs remote (SSH)
-    cmd_result = run_command(task, cmd_string)
+    cmd_result = check_connectivity(task, target, count=2)
 
     # --- RESULT ANALYSIS ---
     if cmd_result.failed:

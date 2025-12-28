@@ -1,6 +1,4 @@
 import json
-import os
-import subprocess
 from pathlib import Path
 
 from nornir.core.task import Task, Result
@@ -8,6 +6,7 @@ from nornir.core.task import Task, Result
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
 from tasks import fail
+from utils.azure import az_connectedk8s_show, az_connectedk8s_connect
 
 
 # --- SUB-STEPS ---
@@ -17,28 +16,18 @@ def _check_arc_status(task: Task, resource_group: str, cluster_name: str) -> Sub
     """
     Verifica se la risorsa Arc esiste già su Azure usando la CLI locale.
     """
-    cmd = [
-        "az", "connectedk8s", "show",
-        "--name", cluster_name,
-        "--resource-group", resource_group,
-        "-o", "json"
-    ]
+    res = az_connectedk8s_show(task, resource_group, cluster_name)
+
+    if res.failed:
+        # Se fallisce, assumiamo che non sia connesso
+        return SubTaskResult(success=True, message="Cluster not connected yet", data=False)
 
     try:
-        # Esecuzione Locale diretta
-        proc = subprocess.run(cmd, capture_output=True, text=True)
-
-        if proc.returncode != 0:
-            # Se fallisce, assumiamo che non sia connesso
-            return SubTaskResult(success=True, message="Cluster not connected yet", data=False)
-
-        data = json.loads(proc.stdout)
+        data = json.loads(res.result)
         state = data.get("connectivityStatus", "Unknown")
         return SubTaskResult(success=True, message=f"Already connected (Status: {state})", data=True)
-
     except Exception as e:
-        # Se az cli non è installata o errore grave
-        return SubTaskResult(success=False, message=f"Local Check Failed: {str(e)}")
+        return SubTaskResult(success=False, message=f"JSON Parse Error: {str(e)}")
 
 
 @automated_substep("Connect Cluster to Azure Arc (Local)")
@@ -53,29 +42,16 @@ def _connect_cluster(task: Task, config: dict, cluster_name: str, kubeconfig_pat
     rg = azure_conf["resource_group"]
     location = azure_conf["location"]
 
-    # Preparazione Environment con KUBECONFIG
-    env = os.environ.copy()
-    env["KUBECONFIG"] = str(Path(kubeconfig_path).absolute())
+    res = az_connectedk8s_connect(
+        task,
+        rg,
+        cluster_name,
+        location,
+        kubeconfig_path
+    )
 
-    # Comando
-    cmd = [
-        "az", "connectedk8s", "connect",
-        "--name", cluster_name,
-        "--resource-group", rg,
-        "--location", location,
-        "--yes",  # Non-interactive
-        "--correlation-id", "calcifer-automation"
-    ]
-
-    try:
-        # Esecuzione con timeout lungo (Arc ci mette un po' a installare gli agenti)
-        proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
-
-        if proc.returncode != 0:
-            return SubTaskResult(success=False, message=f"Arc connection failed: {proc.stderr}")
-
-    except Exception as e:
-        return SubTaskResult(success=False, message=f"Local Execution Error: {e}")
+    if res.failed:
+        return SubTaskResult(success=False, message=f"Arc connection failed: {res.result}")
 
     return SubTaskResult(success=True, message="Arc Agents installed & connected")
 

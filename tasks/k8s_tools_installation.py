@@ -3,7 +3,7 @@ from nornir.core.task import Task, Result
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
 from tasks import fail
-from utils.linux import run_command, add_apt_repository, apt_install, systemctl
+from utils.linux import add_apt_repository, apt_install, systemctl, apt_mark_hold
 
 
 def _get_k8s_version(task: Task) -> str:
@@ -64,8 +64,7 @@ def _hold_packages(task: Task) -> SubTaskResult:
     """
     Prevents automatic upgrades using apt-mark hold.
     """
-    cmd = "apt-mark hold kubelet kubeadm kubectl"
-    res = run_command(task, cmd, sudo=True)
+    res = apt_mark_hold(task, "kubelet kubeadm kubectl")
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to hold packages")
@@ -79,27 +78,7 @@ def _enable_service(task: Task) -> SubTaskResult:
     Enables kubelet so it starts on boot, but doesn't start it immediately 
     (it crashes until configured by kubeadm).
     """
-    res = systemctl(task, "kubelet", "enable", enable=True, sudo=True)
-    # Note: systemctl(action='enable') performs enable. My util: systemctl(task, service, action, enable=False).
-    # Usage: systemctl(task, "kubelet", "enable") is wrong because action should be start/stop/restart/reload.
-    # But wait, systemctl command is `systemctl enable kubelet`. 
-    # My util: cmd = f"systemctl {action} {service}". So passing action="enable" works!
-    # However, if I pass enable=True, it appends "&& systemctl enable ...".
-    # So if I do systemctl(..., action="enable"), it runs "systemctl enable kubelet".
-    # If I do systemctl(..., action="start", enable=True), it runs "systemctl start kubelet && systemctl enable kubelet".
-    # Here the original code only did `enable`.
-    # So I should use action="enable" and enable=False (default).
-
-    # Correction:
-    # If I use action="enable", enable=True -> "systemctl enable kubelet && systemctl enable kubelet". Harmless but redundant.
-    # I'll just use action="enable".
-
-    # Wait, the util signature is:
-    # def systemctl(task: Task, service: str, action: str, enable: bool = False, sudo: bool = True) -> Result:
-    # cmd = f"systemctl {action} {service}"
-
-    # So action="enable" works.
-
+    # Note: Using action="enable" with systemctl wrapper
     res = systemctl(task, "kubelet", "enable", sudo=True)
 
     if res.failed:

@@ -3,7 +3,8 @@ from nornir.core.task import Task, Result
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
 from tasks import fail
-from utils.linux import add_apt_repository, apt_install, command_exists
+from utils.azure import az_is_installed
+from utils.linux import add_apt_repository, apt_install
 
 
 # --- SUB-STEPS ---
@@ -56,7 +57,7 @@ def ensure_azure_cli(task: Task) -> Result:
     Orchestrates the installation of Azure CLI.
     """
     # 0. Check if Azure CLI is already installed
-    if command_exists(task, "az"):
+    if az_is_installed(task):
         return Result(
             host=task.host,
             result=StandardResult(

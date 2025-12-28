@@ -1,5 +1,4 @@
 import os
-import subprocess
 from pathlib import Path
 
 from nornir.core.task import Task, Result
@@ -8,11 +7,16 @@ from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
 from tasks import fail
 from utils.linux import (
-    run_command,
     write_file,
     read_file,
     remote_file_exists,
-    remove_file
+    make_directory,
+    remove_file,
+    kubeadm_init,
+    copy_file,
+    change_owner,
+    kubectl_apply,
+    kubectl_taint
 )
 
 
@@ -56,8 +60,7 @@ networking:
 
 @automated_substep("Run Kubeadm Init")
 def _run_kubeadm_init(task: Task) -> SubTaskResult:
-    cmd = "kubeadm init --config /tmp/kubeadm-config.yaml --upload-certs"
-    res = run_command(task, cmd, sudo=True)
+    res = kubeadm_init(task, "/tmp/kubeadm-config.yaml")
 
     # CLEANUP
     remove_file(task, "/tmp/kubeadm-config.yaml", sudo=True)
@@ -94,17 +97,19 @@ def _fetch_kubeconfig_local(task: Task, local_path_str: str) -> SubTaskResult:
 
 @automated_substep("Setup User Kubeconfig (Remote)")
 def _setup_user_kubeconfig(task: Task) -> SubTaskResult:
-    # Use $HOME expansion from shell
-    run_command(task, "mkdir -p $HOME/.kube")
+    # Use $HOME expansion from shell. make_directory uses mkdir -p
+    make_directory(task, "$HOME/.kube")
 
-    cp_cmd = "cp -i /etc/kubernetes/admin.conf $HOME/.kube/config"
-    res_cp = run_command(task, cp_cmd, sudo=True)
+    res_cp = copy_file(task, "/etc/kubernetes/admin.conf", "$HOME/.kube/config", sudo=True)
 
     if res_cp.failed:
         return SubTaskResult(success=False, message="Failed to copy kubeconfig")
 
-    chown_cmd = "chown $(id -u):$(id -g) $HOME/.kube/config"
-    res_chown = run_command(task, chown_cmd, sudo=True)
+    # chown $(id -u):$(id -g) might need shell interpolation.
+    # change_owner wrapper uses simple string for owner.
+    # We can use `chown $(id -u):$(id -g)` as the owner string if _run_command allows it?
+    # Yes, _run_command passes it to shell or ssh.
+    res_chown = change_owner(task, "$HOME/.kube/config", "$(id -u):$(id -g)", sudo=True)
 
     if res_chown.failed:
         return SubTaskResult(success=False, message="Failed to set permissions")
@@ -120,20 +125,12 @@ def _install_cni(task: Task, manifest_url: str, kubeconfig_path: str) -> SubTask
     if not Path(kubeconfig_path).exists():
         return SubTaskResult(success=False, message=f"Local kubeconfig not found at {kubeconfig_path}")
 
-    cmd = f"export KUBECONFIG={Path(kubeconfig_path).absolute()} && kubectl apply -f {manifest_url}"
+    # Use generic kubectl_apply wrapper.
+    # Note: kubeconfig_path must be absolute path string.
+    res = kubectl_apply(task, manifest_url, str(Path(kubeconfig_path).absolute()))
 
-    try:
-        proc = subprocess.run(
-            cmd,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True
-        )
-        if proc.returncode != 0:
-            return SubTaskResult(success=False, message=f"CNI Install Failed: {proc.stderr}")
-    except Exception as e:
-        return SubTaskResult(success=False, message=f"Local execution error: {e}")
+    if res.failed:
+        return SubTaskResult(success=False, message=f"CNI Install Failed: {res.stderr}")
 
     return SubTaskResult(success=True, message="CNI Plugin installed via Local Kubectl")
 
@@ -145,23 +142,15 @@ def _untaint_node(task: Task, kubeconfig_path: str) -> SubTaskResult:
     """
     node_name = task.host.name
 
-    cmd = (
-        f"export KUBECONFIG={Path(kubeconfig_path).absolute()} && "
-        f"kubectl taint nodes {node_name} node-role.kubernetes.io/control-plane:NoSchedule-"
-    )
+    # "node-role.kubernetes.io/control-plane:NoSchedule-"
+    taint = "node-role.kubernetes.io/control-plane:NoSchedule-"
 
-    try:
-        proc = subprocess.run(
-            cmd,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True
-        )
-        if proc.returncode != 0 and "not found" not in proc.stderr:
-            return SubTaskResult(success=False, message=f"Untaint Failed: {proc.stderr}")
-    except Exception as e:
-        return SubTaskResult(success=False, message=f"Local execution error: {e}")
+    res = kubectl_taint(task, node_name, taint, str(Path(kubeconfig_path).absolute()))
+
+    if res.failed:
+        # Check if error is just "not found" (already untainted)
+        if "not found" not in res.stderr and "not found" not in res.result:
+            return SubTaskResult(success=False, message=f"Untaint Failed: {res.stderr}")
 
     return SubTaskResult(success=True, message="Control Plane untainted via Local Kubectl")
 

@@ -3,19 +3,19 @@ from nornir.core.task import Task, Result
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
 from tasks import fail
-from utils.linux import run_command
+from utils.linux import read_file, get_dpkg_architecture
 
 
 @automated_substep("Read OS Release")
 def _get_os_release(task: Task) -> SubTaskResult:
     """Parses /etc/os-release into a dictionary."""
     # Read file
-    res = run_command(task, "cat /etc/os-release")
-    if res.failed:
+    content = read_file(task, "/etc/os-release")
+    if not content:
         return SubTaskResult(success=False, message="Could not read /etc/os-release")
 
     data = {}
-    for line in res.result.splitlines():
+    for line in content.splitlines():
         if "=" in line:
             key, value = line.split("=", 1)
             # Remove quotes
@@ -27,7 +27,7 @@ def _get_os_release(task: Task) -> SubTaskResult:
 @automated_substep("Check CPU Architecture")
 def _get_cpu_arch(task: Task) -> SubTaskResult:
     """Gets architecture (amd64/arm64) via dpkg for accurate deb repo mapping."""
-    res = run_command(task, "dpkg --print-architecture")
+    res = get_dpkg_architecture(task)
     if res.failed:
         return SubTaskResult(success=False, message="Could not determine architecture")
 

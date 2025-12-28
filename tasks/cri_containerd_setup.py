@@ -6,12 +6,12 @@ from tasks import fail
 from utils.linux import (
     apt_install,
     add_apt_repository,
-    run_command,
     write_file,
     read_file,
     remote_file_exists,
     make_directory,
-    systemctl
+    systemctl,
+    containerd_config_default
 )
 
 
@@ -84,8 +84,7 @@ def _configure_containerd(task: Task) -> SubTaskResult:
     make_directory(task, "/etc/containerd", sudo=True)
 
     if not remote_file_exists(task, config_path):
-        gen_cmd = "containerd config default"
-        res_gen = run_command(task, gen_cmd)
+        res_gen = containerd_config_default(task)
         if res_gen.failed:
             return SubTaskResult(success=False, message="Failed to generate default config")
 
@@ -100,7 +99,7 @@ def _configure_containerd(task: Task) -> SubTaskResult:
     content = re.sub(r"(\s*SystemdCgroup\s*=\s*)false", r"\1true", content)
 
     # Remove CRI from disabled_plugins
-    content = re.sub(r'(disabled_plugins\s*=\s*\[.*)("cri",?.*\\])', r'\1]', content)
+    content = re.sub(r'(disabled_plugins\s*=\s*\[.*)("cri",?.*\\])', r"\1]", content)
     
     res_patch = write_file(task, config_path, content)
 
