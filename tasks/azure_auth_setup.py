@@ -4,7 +4,8 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import run_command, fail
+from tasks import fail
+from utils.linux import run_command, command_exists
 
 
 @automated_substep("Check Execution Environment")
@@ -16,8 +17,7 @@ def _check_environment(task: Task) -> SubTaskResult:
 
 @automated_substep("Check Azure CLI Binary")
 def _check_cli_installed(task: Task) -> SubTaskResult:
-    res = run_command(task, "which az")
-    if res.failed:
+    if not command_exists(task, "az"):
         return SubTaskResult(success=False, message="Binary 'az' not found")
     return SubTaskResult(success=True, message="CLI Found")
 

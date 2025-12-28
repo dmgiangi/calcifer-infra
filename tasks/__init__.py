@@ -1,21 +1,18 @@
-from .utils import (
-    run_command,
-    fail,
-    read_file,
-    write_file,
-    ensure_line_in_file,
-    add_apt_repository,
-    remote_file_exists,
-    apt_install
-)
+from nornir.core.task import Task, Result
+
+from core.models import TaskStatus, StandardResult, SubTaskResult
+
+
+def fail(task: Task, sub_res: SubTaskResult) -> Result:
+    """
+    Helper to return a failed Result from a SubTaskResult.
+    """
+    return Result(
+        host=task.host,
+        failed=True,
+        result=StandardResult(TaskStatus.FAILED, sub_res.message)
+    )
 
 __all__ = [
-    "run_command",
-    "fail",
-    "read_file",
-    "write_file",
-    "ensure_line_in_file",
-    "add_apt_repository",
-    "remote_file_exists",
-    "apt_install"
+    "fail"
 ]

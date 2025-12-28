@@ -2,7 +2,8 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import run_command, fail, ensure_line_in_file
+from tasks import fail
+from utils.linux import run_command, ensure_line_in_file
 
 
 # --- SUB-STEPS ---

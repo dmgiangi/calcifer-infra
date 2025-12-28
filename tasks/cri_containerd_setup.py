@@ -2,7 +2,17 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import fail, run_command, write_file, read_file, remote_file_exists, add_apt_repository, apt_install
+from tasks import fail
+from utils.linux import (
+    apt_install,
+    add_apt_repository,
+    run_command,
+    write_file,
+    read_file,
+    remote_file_exists,
+    make_directory,
+    systemctl
+)
 
 
 # --- SUB-STEPS ---
@@ -71,7 +81,7 @@ def _configure_containerd(task: Task) -> SubTaskResult:
     import re
 
     # 1. Generate Default Config if missing
-    run_command(task, "mkdir -p /etc/containerd", True)
+    make_directory(task, "/etc/containerd", sudo=True)
 
     if not remote_file_exists(task, config_path):
         gen_cmd = "containerd config default"
@@ -106,8 +116,7 @@ def _restart_service(task: Task) -> SubTaskResult:
     """
     Restarts and enables the containerd service.
     """
-    cmd = "sudo systemctl restart containerd && sudo systemctl enable containerd"
-    res = run_command(task, cmd)
+    res = systemctl(task, "containerd", "restart", enable=True)
 
     if res.failed:
         return SubTaskResult(success=False, message="Failed to restart service")

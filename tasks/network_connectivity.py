@@ -3,7 +3,7 @@ from nornir.core.task import Task, Result
 from core.decorators import automated_step
 from core.decorators import console
 from core.models import TaskStatus, StandardResult
-from tasks import run_command
+from utils.linux import run_command
 
 
 @automated_step("Check Internet Connectivity")

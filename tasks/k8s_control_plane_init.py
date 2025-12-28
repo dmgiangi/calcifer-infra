@@ -6,7 +6,14 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import fail, run_command, write_file, read_file, remote_file_exists
+from tasks import fail
+from utils.linux import (
+    run_command,
+    write_file,
+    read_file,
+    remote_file_exists,
+    remove_file
+)
 
 
 @automated_substep("Check Cluster Status")
@@ -49,11 +56,11 @@ networking:
 
 @automated_substep("Run Kubeadm Init")
 def _run_kubeadm_init(task: Task) -> SubTaskResult:
-    cmd = "sudo kubeadm init --config /tmp/kubeadm-config.yaml --upload-certs"
-    res = run_command(task, cmd)
+    cmd = "kubeadm init --config /tmp/kubeadm-config.yaml --upload-certs"
+    res = run_command(task, cmd, sudo=True)
 
     # CLEANUP
-    run_command(task, "rm /tmp/kubeadm-config.yaml", sudo=True)
+    remove_file(task, "/tmp/kubeadm-config.yaml", sudo=True)
 
     if res.failed:
         return SubTaskResult(success=False, message=f"Init failed. Output: {res.result[-200:]}")
@@ -87,15 +94,17 @@ def _fetch_kubeconfig_local(task: Task, local_path_str: str) -> SubTaskResult:
 
 @automated_substep("Setup User Kubeconfig (Remote)")
 def _setup_user_kubeconfig(task: Task) -> SubTaskResult:
+    # Use $HOME expansion from shell
     run_command(task, "mkdir -p $HOME/.kube")
-    cp_cmd = "sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config"
-    res_cp = run_command(task, cp_cmd)
+
+    cp_cmd = "cp -i /etc/kubernetes/admin.conf $HOME/.kube/config"
+    res_cp = run_command(task, cp_cmd, sudo=True)
 
     if res_cp.failed:
         return SubTaskResult(success=False, message="Failed to copy kubeconfig")
 
-    chown_cmd = "sudo chown $(id -u):$(id -g) $HOME/.kube/config"
-    res_chown = run_command(task, chown_cmd)
+    chown_cmd = "chown $(id -u):$(id -g) $HOME/.kube/config"
+    res_chown = run_command(task, chown_cmd, sudo=True)
 
     if res_chown.failed:
         return SubTaskResult(success=False, message="Failed to set permissions")

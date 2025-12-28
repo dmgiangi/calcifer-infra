@@ -4,29 +4,38 @@ from nornir.core.task import Task, Result
 
 from core.decorators import automated_step, automated_substep
 from core.models import TaskStatus, StandardResult, SubTaskResult
-from tasks import fail, run_command, write_file, remote_file_exists
+from tasks import fail
+from utils.linux import (
+    run_command,
+    write_file,
+    remote_file_exists,
+    curl_download,
+    command_exists,
+    change_mode,
+    make_directory,
+    remove_file
+)
 
 
 # --- SUB-STEPS ---
 
 @automated_substep("Install Flux CLI")
 def _install_flux_cli(task: Task) -> SubTaskResult:
-    check_cmd = "which flux"
-    if not run_command(task, check_cmd).failed:
+    if command_exists(task, "flux"):
         return SubTaskResult(success=True, message="Flux CLI already installed")
 
     install_script_path = "/tmp/install_flux.sh"
-    download_cmd = f"curl -sS https://fluxcd.io/install.sh -o {install_script_path}"
-    res_download = run_command(task, download_cmd)
+
+    res_download = curl_download(task, "https://fluxcd.io/install.sh", install_script_path)
     if res_download.failed:
         return SubTaskResult(success=False, message="Failed to download Flux CLI install script")
 
-    run_command(task, f"chmod +x {install_script_path}")
+    change_mode(task, install_script_path, "+x")
 
-    install_cmd = f"sudo {install_script_path}"
-    res_install = run_command(task, install_cmd)
+    install_cmd = f"{install_script_path}"
+    res_install = run_command(task, install_cmd, sudo=True)
 
-    run_command(task, f"rm {install_script_path}")
+    remove_file(task, install_script_path)
 
     if res_install.failed:
         return SubTaskResult(success=False, message="Failed to install Flux CLI")
@@ -48,11 +57,12 @@ def _configure_ssh_key(task: Task, local_path: str, remote_path: str) -> SubTask
 
     # 2. Ensure Remote Directory
     remote_dir = str(Path(remote_path).parent)
-    run_command(task, f"mkdir -p {remote_dir}")
+    make_directory(task, remote_dir)
 
     # 3. Write Remote File (Secure)
     user = task.host.username
     owner = f"{user}:{user}"
+    # Note: write_file signature in utils.linux is write_file(task, path, content, owner, permissions, sudo)
     res_write = write_file(task, remote_path, key_content, owner=owner, permissions="0600")
 
     if res_write.failed:
@@ -93,7 +103,7 @@ def _bootstrap_flux(task: Task, config: dict) -> SubTaskResult:
     # --- SECURITY CLEANUP ---
     # Delete the private key file from the host.
     # It is now safely stored as a Kubernetes Secret.
-    run_command(task, f"rm -f {key_path}", sudo=True)
+    remove_file(task, key_path, sudo=True)
 
     if res.failed:
         err_snippet = res.result[-200:] if res.result else "Unknown Error"
