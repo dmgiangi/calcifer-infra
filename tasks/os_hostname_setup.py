@@ -1,7 +1,10 @@
 from pyinfra import host
 from pyinfra.operations import server, files
 
+from utils.logger import log_operation
 
+
+@log_operation
 def set_hostname_and_hosts():
     """
     Configures the system hostname and /etc/hosts file.

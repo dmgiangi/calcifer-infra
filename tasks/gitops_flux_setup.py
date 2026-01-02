@@ -1,7 +1,10 @@
 from pyinfra import host
 from pyinfra.operations import server, files
 
+from utils.logger import log_operation
 
+
+@log_operation
 def setup_fluxcd():
     """
     Install & Bootstrap FluxCD.

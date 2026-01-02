@@ -1,7 +1,10 @@
 from pyinfra import host
 from pyinfra.operations import server
 
+from utils.logger import log_operation
 
+
+@log_operation
 def ensure_azure_login():
     """
     Ensures Azure Login & Prerequisites.

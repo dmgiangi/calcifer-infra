@@ -1,14 +1,19 @@
+from io import StringIO
+
 from pyinfra import host
 from pyinfra.operations import server, files
 
+from utils.logger import log_operation
 
+
+@log_operation
 def prepare_k8s_node():
     """
     Prepares the OS for Kubernetes: Modules, Sysctl, Swap.
     """
     config = host.data.app_config.k8s
-    modules = config.get("kernel_modules", [])
-    sysctl_params = config.get("sysctl_params", {})
+    modules = config.kernel_modules
+    sysctl_params = config.sysctl_params
 
     # 1. Kernel Modules
     if modules:
@@ -22,7 +27,7 @@ def prepare_k8s_node():
         files.put(
             name="Persist kernel modules configuration",
             dest="/etc/modules-load.d/k8s.conf",
-            content="\n".join(modules) + "\n",
+            src=StringIO("\n".join(modules) + "\n"),
         )
 
     # 2. Sysctl Params
@@ -31,7 +36,7 @@ def prepare_k8s_node():
         files.put(
             name="Configure sysctl parameters",
             dest="/etc/sysctl.d/k8s.conf",
-            content=content,
+            src=StringIO(content),
         )
         server.shell(
             name="Reload sysctl",

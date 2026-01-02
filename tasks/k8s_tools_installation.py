@@ -1,20 +1,31 @@
 from pyinfra import host
-from pyinfra.operations import apt, server, systemd
+from pyinfra.operations import apt, server, systemd, files
+
+from utils.logger import log_operation
 
 
+@log_operation
 def install_kubernetes_tools():
     """
     Installs kubeadm, kubelet, and kubectl.
     """
     config = host.data.app_config.k8s
-    k8s_version = config.get("version", "1.29")
+    k8s_version = config.version
     if not k8s_version.startswith("v"):
         k8s_version = f"v{k8s_version}"
 
     # 1. Add Repo
-    apt.key(
-        name="Add Kubernetes Apt Key",
-        src=f"https://pkgs.k8s.io/core:/stable:/{k8s_version}/deb/Release.key",
+    files.directory(
+        name="Ensure /etc/apt/keyrings exists",
+        path="/etc/apt/keyrings",
+        mode="755",
+    )
+
+    server.shell(
+        name="Download and dearmor Kubernetes Apt Key",
+        commands=[
+            f"curl -fsSL https://pkgs.k8s.io/core:/stable:/{k8s_version}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-archive-keyring.gpg --yes"
+        ],
     )
 
     apt.repo(

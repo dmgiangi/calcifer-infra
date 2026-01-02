@@ -9,7 +9,7 @@ k8s:
   version: "1.34"
   pod_network_cidr: "10.244.0.0/16"
 
-  local_kubeconfig_path: "inventory/my_custom_kubeconfig.yaml"
+  local_kubeconfig_path: "/home/fubus/.kube/config"
 
   # Complex list (not manageable via ENV)
   kernel_modules:
@@ -26,6 +26,8 @@ k8s:
 
   flux:
     enabled: true
-    github_url: "ssh://git@github.com/dmgiangi/calcifer-gitops.git"
+    github_url: "git@github.com:dmgiangi/calcifer-platform-gitops.git"
     branch: "main"
     cluster_path: "clusters/production"
+    local_key_path: "/home/fubus/.ssh/flux_id"
+    remote_key_path: "/tmp/flux_id"

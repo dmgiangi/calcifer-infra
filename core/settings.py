@@ -29,8 +29,8 @@ class FluxSettings:
     branch: str = "main"
     cluster_path: str = ""
     # Structural defaults (can be overridden by YAML)
-    local_key_path: str = "./config/flux_identity"
-    remote_key_path: str = "/home/calcifer/.ssh/flux_identity"
+    remote_key_path: str = "/tmp/flux_identity"
+    local_key_path: str = None
 
 
 @dataclass

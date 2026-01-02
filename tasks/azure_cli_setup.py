@@ -1,6 +1,9 @@
 from pyinfra.operations import apt
 
+from utils.logger import log_operation
 
+
+@log_operation
 def ensure_azure_cli():
     """
     Ensures Azure CLI is installed.

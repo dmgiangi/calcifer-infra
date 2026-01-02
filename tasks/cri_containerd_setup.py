@@ -1,6 +1,9 @@
 from pyinfra.operations import apt, server, files, systemd
 
+from utils.logger import log_operation
 
+
+@log_operation
 def install_containerd():
     """
     Install & Configure Containerd.

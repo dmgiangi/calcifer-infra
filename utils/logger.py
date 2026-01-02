@@ -1,8 +1,12 @@
+import functools
 import logging
 from pathlib import Path
 
+from rich.console import Console
+
 # System logger configuration (non-UI)
 LOG_FILE = Path("calcifer.log")
+console = Console()
 
 def setup_logger():
     """
@@ -31,3 +35,23 @@ def setup_logger():
 
 # Singleton instance
 sys_logger = setup_logger()
+
+
+def log_operation(func):
+    """
+    Decorator to log the start and end of an operation on a single line.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        op_name = func.__name__.replace("_", " ").title()
+        console.print(f"🔹 [bold cyan]Starting operation:[/bold cyan] {op_name}...", end="\r")
+        try:
+            result = func(*args, **kwargs)
+            console.print(f"✅ [bold green]Operation completed:[/bold green] {op_name}   ")
+            return result
+        except Exception as e:
+            console.print(f"❌ [bold red]Operation failed:[/bold red] {op_name} ({e})")
+            raise e
+
+    return wrapper
