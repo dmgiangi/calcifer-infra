@@ -20,20 +20,41 @@ def setup_fluxcd():
     )
 
     # 2. Upload SSH Key
+    ssh_user = host.data.ssh_user
+    remote_ssh_dir = f"/home/{ssh_user}/.ssh"
+    remote_key_path = f"{remote_ssh_dir}/flux_identity"
+
+    files.directory(
+        name="Ensure .ssh directory exists",
+        path=remote_ssh_dir,
+        mode="700",
+        user=ssh_user,
+        group=ssh_user,
+    )
+
     files.put(
         name="Upload Flux SSH Key",
         src=config.local_key_path,
-        dest=config.remote_key_path,
+        dest=remote_key_path,
         mode="600",
+        user=ssh_user,
+        group=ssh_user,
     )
 
     # 3. Bootstrap
+    github_url = config.github_url
+    if github_url.startswith("https://github.com/"):
+        # Convert HTTPS to SSH for Flux
+        # From: https://github.com/user/repo.git
+        # To:   ssh://git@github.com/user/repo.git
+        github_url = github_url.replace("https://github.com/", "ssh://git@github.com/")
+
     bootstrap_cmd = (
         f"flux bootstrap git "
-        f"--url={config.github_url} "
+        f"--url={github_url} "
         f"--branch={config.branch} "
         f"--path={config.cluster_path} "
-        f"--private-key-file={config.remote_key_path} "
+        f"--private-key-file={remote_key_path} "
         f"--silent"
     )
 
@@ -45,5 +66,5 @@ def setup_fluxcd():
     # 4. Cleanup
     server.shell(
         name="Cleanup Flux SSH Key",
-        commands=[f"rm -f {config.remote_key_path}"],
+        commands=[f"rm -f {remote_key_path}"],
     )

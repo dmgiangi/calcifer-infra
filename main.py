@@ -120,7 +120,7 @@ def init(
 @app.command(name="connect-arc")
 def connect_arc(
         target: str = typer.Option(
-            None, "--target", "-t",
+            "local", "--target", "-t",
             help="Target group (local, cp, workers) or specific host."
         )
 ):

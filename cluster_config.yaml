@@ -26,8 +26,8 @@ k8s:
 
   flux:
     enabled: true
-    github_url: "git@github.com:dmgiangi/calcifer-platform-gitops.git"
-    branch: "main"
+    github_url: "https://github.com/dmgiangi/calcifer-platform-gitops.git"
+    branch: "master"
     cluster_path: "clusters/production"
     local_key_path: "/home/fubus/.ssh/flux_id"
     remote_key_path: "/tmp/flux_id"
