@@ -10,7 +10,8 @@ from rich.panel import Panel
 
 import inventory
 from core.state import config as global_config
-from deploy import deploy_init, deploy_arc
+from deploy import deploy_init, deploy_arc, deploy_init_docker
+from tasks import deploy_docker_app
 
 app = typer.Typer(
     help="Calcifer Infrastructure Manager - K8s & Arc Automation",
@@ -115,6 +116,32 @@ def init(
     [Idempotent] Provisions the infrastructure.
     """
     run_deploy(deploy_init, target_group=target)
+
+
+@app.command(name="init-docker")
+def init_docker(
+        target: str = typer.Option(
+            "cp", "--target", "-t",
+            help="Target group (local, cp, workers) or specific host."
+        )
+):
+    """
+    [Idempotent] Provisions the infrastructure.
+    """
+    run_deploy(deploy_init_docker, target_group=target)
+
+
+@app.command(name="deploy-docker")
+def deploy_docker(
+        target: str = typer.Option(
+            "cp", "--target", "-t",
+            help="Target group (local, cp, workers) or specific host."
+        )
+):
+    """
+    [Idempotent] Provisions the infrastructure.
+    """
+    run_deploy(deploy_docker_app, target_group=target)
 
 
 @app.command(name="connect-arc")

@@ -1,0 +1,30 @@
+[
+  {
+    "file": "docker-compose.yaml",
+    "dest": "/opt/infra/docker-compose.yaml",
+    "mode": "600",
+    "overwrite": true,
+    "substitute_secrets": false
+  },
+  {
+    "file": ".env",
+    "dest": "/opt/infra/.env",
+    "mode": "600",
+    "overwrite": true,
+    "substitute_secrets": false
+  },
+  {
+    "file": "realm-export.json",
+    "dest": "/opt/infra/keycloak-data/realm-export.json",
+    "mode": "600",
+    "overwrite": true,
+    "substitute_secrets": true
+  },
+  {
+    "file": "acme.json",
+    "dest": "/opt/infra/letsencrypt/acme.json",
+    "mode": "600",
+    "overwrite": false,
+    "substitute_secrets": false
+  }
+]

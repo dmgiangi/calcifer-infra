@@ -2,6 +2,8 @@ from .azure_arc_onboarding import install_arc_agent
 from .azure_auth_setup import ensure_azure_login
 from .azure_cli_setup import ensure_azure_cli
 from .cri_containerd_setup import install_containerd
+from .docker_deploy import deploy_docker_app
+from .docker_install import install_docker
 from .gitops_flux_setup import setup_fluxcd
 from .k8s_control_plane_init import init_control_plane
 from .k8s_node_preparation import prepare_k8s_node
@@ -15,6 +17,8 @@ __all__ = [
     "prepare_k8s_node",
     "install_kubernetes_tools",
     "install_containerd",
+    "install_docker",
+    "deploy_docker_app",
     "init_control_plane",
     "ensure_azure_cli",
     "ensure_azure_login",
