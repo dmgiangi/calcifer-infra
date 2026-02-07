@@ -1,6 +1,5 @@
 from pyinfra.api import deploy
 
-from tasks import install_docker, deploy_docker_app
 from tasks.cri_containerd_setup import install_containerd
 from tasks.gitops_flux_setup import setup_fluxcd
 from tasks.k8s_control_plane_init import init_control_plane
@@ -10,21 +9,7 @@ from tasks.network_connectivity import check_internet_access
 from tasks.os_hostname_setup import set_hostname_and_hosts
 
 
-@deploy("Initialize docker")
-def deploy_init_docker():
-    check_internet_access()
-    set_hostname_and_hosts()
-    prepare_k8s_node()
-    install_docker()
-    deploy_docker_app()
-
-
-@deploy("Deploy Docker App")
-def deploy_app():
-    deploy_docker_app()
-
-
-@deploy("Initialize Cluster")
+@deploy("Initialize Kubernetes Cluster")
 def deploy_init():
     check_internet_access()
     set_hostname_and_hosts()

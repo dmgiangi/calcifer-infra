@@ -10,11 +10,10 @@ from rich.panel import Panel
 
 import inventory
 from core.state import config as global_config
-from deploy import deploy_init, deploy_init_docker
-from tasks import deploy_docker_app
+from deploy import deploy_init
 
 app = typer.Typer(
-  help="Calcifer Infrastructure Manager - K8s Automation",
+    help="Calcifer Infrastructure Manager - K8s Automation",
     add_completion=True,
     no_args_is_help=True
 )
@@ -113,35 +112,9 @@ def init(
         )
 ):
     """
-    [Idempotent] Provisions the infrastructure.
+    [Idempotent] Provisions the Kubernetes cluster infrastructure.
     """
     run_deploy(deploy_init, target_group=target)
-
-
-@app.command(name="init-docker")
-def init_docker(
-        target: str = typer.Option(
-            "cp", "--target", "-t",
-            help="Target group (local, cp, workers) or specific host."
-        )
-):
-    """
-    [Idempotent] Provisions the infrastructure.
-    """
-    run_deploy(deploy_init_docker, target_group=target)
-
-
-@app.command(name="deploy-docker")
-def deploy_docker(
-        target: str = typer.Option(
-            "cp", "--target", "-t",
-            help="Target group (local, cp, workers) or specific host."
-        )
-):
-    """
-    [Idempotent] Provisions the infrastructure.
-    """
-    run_deploy(deploy_docker_app, target_group=target)
 
 
 if __name__ == "__main__":

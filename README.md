@@ -106,22 +106,6 @@ This is the main provisioning command. It performs the following sequence on the
 python main.py init
 ```
 
-### Step 2: 🐳 Initialize with Docker
-
-Alternatively, you can provision a node with Docker and deploy a Docker Compose stack:
-
-```bash
-python main.py init-docker
-```
-
-### Step 3: 📦 Deploy Docker App
-
-Deploy or update the Docker application stack:
-
-```bash
-python main.py deploy-docker
-```
-
 ## 📂 Project Structure
 
 ```text
@@ -134,7 +118,6 @@ python main.py deploy-docker
 ├── inventory/          # Pyinfra inventory files
 │   ├── hosts.yaml      # Define your servers here
 │   └── groups.yaml     # Define host groups
-├── docker-infra/       # Docker Compose stack and assets
 ├── utils/              # Helper utilities like the file logger
 ├── main.py             # Typer CLI application entrypoint
 ├── deploy.py           # Deploy workflows definitions

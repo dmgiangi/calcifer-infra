@@ -40,27 +40,9 @@ class K8sSettings:
 
 
 @dataclass
-class DockerSettings:
-    """Defines Docker configuration."""
-    # Installation
-    install_packages: List[str] = field(default_factory=lambda: [
-        "docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin"
-    ])
-    old_packages: List[str] = field(default_factory=lambda: [
-        "docker.io", "docker-compose", "docker-compose-v2", "docker-doc", "podman-docker", "containerd", "runc"
-    ])
-
-    # Deployment
-    source_path: str = "./docker-infra"  # Directory containing docker-compose.yml and other assets
-    remote_path: str = "/opt/infra"
-    app_name: str = "calcifer"
-
-
-@dataclass
 class AppSettings:
     """Root configuration object."""
     k8s: K8sSettings = field(default_factory=K8sSettings)
-    docker: DockerSettings = field(default_factory=DockerSettings)
     environment: str = "dev"
 
 
@@ -89,11 +71,6 @@ def load_settings(config_path: str = "cluster_config.yaml") -> AppSettings:
         "k8s": {
             "version": os.getenv("K8S_VERSION"),
         },
-        "docker": {
-            "app_name": os.getenv("DOCKER_APP_NAME"),
-            "remote_path": os.getenv("DOCKER_REMOTE_PATH"),
-            "source_path": os.getenv("DOCKER_SOURCE_PATH"),
-        }
     }
 
     # Cleanup: We remove None/Empty keys from ENV dictionaries
@@ -129,17 +106,10 @@ def load_settings(config_path: str = "cluster_config.yaml") -> AppSettings:
 
     k8s_obj = K8sSettings(**k8s_args)
 
-    # --- Docker ---
-    docker_file = file_config.get("docker", {})
-    docker_env = env_config.get("docker", {})
-    docker_final = {**docker_file, **docker_env}
-    docker_obj = DockerSettings(**{k: v for k, v in docker_final.items() if k in DockerSettings.__annotations__})
-
     # --- App Root ---
     app_env_val = env_config.get("environment") or file_config.get("environment", "dev")
 
     return AppSettings(
         k8s=k8s_obj,
-        docker=docker_obj,
         environment=app_env_val
     )
