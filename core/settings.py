@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Dict, List, Union
+from typing import Dict, List, Union
 
 import yaml
 from dotenv import load_dotenv
@@ -11,15 +11,6 @@ load_dotenv()
 
 
 # --- DATACLASSES (SCHEMA) ---
-
-@dataclass
-class AzureSettings:
-    """Defines Azure connection parameters."""
-    subscription_id: str = ""
-    tenant_id: Optional[str] = None
-    location: str = "westeurope"
-    resource_group: str = "calcifer-rg"
-
 
 @dataclass
 class FluxSettings:
@@ -68,7 +59,6 @@ class DockerSettings:
 @dataclass
 class AppSettings:
     """Root configuration object."""
-    azure: AzureSettings = field(default_factory=AzureSettings)
     k8s: K8sSettings = field(default_factory=K8sSettings)
     docker: DockerSettings = field(default_factory=DockerSettings)
     environment: str = "dev"
@@ -96,12 +86,6 @@ def load_settings(config_path: str = "cluster_config.yaml") -> AppSettings:
     # We manually map only the keys that make sense to override via ENV
     env_config = {
         "environment": os.getenv("ENV"),
-        "azure": {
-            "subscription_id": os.getenv("AZURE_SUBSCRIPTION_ID"),
-            "tenant_id": os.getenv("AZURE_TENANT_ID"),
-            "location": os.getenv("AZURE_LOCATION"),
-            "resource_group": os.getenv("AZURE_RESOURCE_GROUP"),
-        },
         "k8s": {
             "version": os.getenv("K8S_VERSION"),
         },
@@ -120,19 +104,6 @@ def load_settings(config_path: str = "cluster_config.yaml") -> AppSettings:
     env_config = clean_none(env_config)
 
     # 3. Merge Logic
-
-    # --- Azure ---
-    az_defaults = {"location": "westeurope", "resource_group": "calcifer-rg"}
-    az_file = file_config.get("azure", {})
-    az_env = env_config.get("azure", {})
-    # Priority: Env > File > Defaults
-    az_final = {**az_defaults, **az_file, **az_env}
-
-    if not az_final.get("subscription_id"):
-        raise ValueError("Missing Critical Config: AZURE_SUBSCRIPTION_ID (env or yaml)")
-
-    # We filter only known keys to avoid init errors
-    azure_obj = AzureSettings(**{k: v for k, v in az_final.items() if k in AzureSettings.__annotations__})
 
     # --- Kubernetes ---
     k8s_defaults = {
@@ -168,7 +139,6 @@ def load_settings(config_path: str = "cluster_config.yaml") -> AppSettings:
     app_env_val = env_config.get("environment") or file_config.get("environment", "dev")
 
     return AppSettings(
-        azure=azure_obj,
         k8s=k8s_obj,
         docker=docker_obj,
         environment=app_env_val

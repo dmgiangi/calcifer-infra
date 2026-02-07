@@ -1,6 +1,3 @@
-from .azure_arc_onboarding import install_arc_agent
-from .azure_auth_setup import ensure_azure_login
-from .azure_cli_setup import ensure_azure_cli
 from .cri_containerd_setup import install_containerd
 from .docker_deploy import deploy_docker_app
 from .docker_install import install_docker
@@ -20,8 +17,5 @@ __all__ = [
     "install_docker",
     "deploy_docker_app",
     "init_control_plane",
-    "ensure_azure_cli",
-    "ensure_azure_login",
-    "install_arc_agent",
     "setup_fluxcd",
 ]

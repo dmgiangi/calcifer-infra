@@ -1,7 +1,6 @@
 from pyinfra.api import deploy
 
 from tasks import install_docker, deploy_docker_app
-from tasks.azure_arc_onboarding import install_arc_agent
 from tasks.cri_containerd_setup import install_containerd
 from tasks.gitops_flux_setup import setup_fluxcd
 from tasks.k8s_control_plane_init import init_control_plane
@@ -34,11 +33,3 @@ def deploy_init():
     install_kubernetes_tools()
     init_control_plane()
     setup_fluxcd()
-
-
-@deploy("Azure Arc Onboarding")
-def deploy_arc():
-    # check_internet_access()
-    # ensure_azure_cli()
-    # ensure_azure_login()
-    install_arc_agent()
